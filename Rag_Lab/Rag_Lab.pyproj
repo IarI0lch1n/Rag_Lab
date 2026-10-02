@@ -87,6 +87,7 @@
     <Compile Include="tests\chat_repository_test.py" />
     <Compile Include="tests\internet_research_test.py" />
     <Compile Include="tests\langfuse_test.py" />
+    <Compile Include="tests\langfuse_web_recon_test.py" />
     <Compile Include="tests\llm_smoke_test.py" />
     <Compile Include="tests\qdrant_cleanup_test.py" />
     <Compile Include="tests\rag_chat_test.py" />

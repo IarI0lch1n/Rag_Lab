@@ -1,13 +1,23 @@
 import threading
 
-from dataclasses import dataclass
+from dataclasses import (
+    asdict,
+    dataclass,
+)
+
 from datetime import (
     datetime,
     timezone,
 )
 
+from src.config import settings
+
 from src.db.session import (
     SessionLocal,
+)
+
+from src.observability.langfuse_service import (
+    langfuse_service,
 )
 
 from src.repositories.source_repository import (
@@ -41,10 +51,11 @@ class IndexingResult:
 
 
 class IndexingService:
-    def __init__(self) -> None:
-        self._lock = (
-            threading.Lock()
-        )
+
+    def __init__(
+        self,
+    ) -> None:
+        self._lock = threading.Lock()
 
         self._active_sources: set[
             int
@@ -55,32 +66,77 @@ class IndexingService:
         source_id: int,
     ) -> IndexingResult:
 
-        if not self._acquire_source(
-            source_id
-        ):
-            return IndexingResult(
-                source_id=source_id,
-                source_name=(
-                    self._get_source_name(
+        source_name = (
+            self._get_source_name(
+                source_id
+            )
+        )
+
+        with (
+            langfuse_service
+            .observation(
+                name="source-indexing",
+                as_type="chain",
+                input_data={
+                    "source_id": source_id,
+                    "source_name": (
+                        source_name
+                    ),
+                },
+            )
+        ) as observation:
+
+            if not self._acquire_source(
+                source_id
+            ):
+                result = IndexingResult(
+                    source_id=source_id,
+                    source_name=(
+                        source_name
+                    ),
+                    status="busy",
+                    error=(
+                        "This source is "
+                        "already being indexed."
+                    ),
+                )
+
+                observation.update(
+                    output=asdict(
+                        result
+                    )
+                )
+
+                return result
+
+            try:
+                result = (
+                    self._index_source(
                         source_id
                     )
-                ),
-                status="busy",
-                error=(
-                    "This source is already "
-                    "being indexed."
-                ),
-            )
+                )
 
-        try:
-            return self._index_source(
-                source_id
-            )
+                observation.update(
+                    output=(
+                        asdict(result)
+                    ),
+                    metadata={
+                        "status": (
+                            result.status
+                        ),
+                        "chunks_created": (
+                            result
+                            .chunks_created
+                        ),
+                    },
+                )
 
-        finally:
-            self._release_source(
-                source_id
-            )
+                return result
+
+            finally:
+                self._release_source(
+                    source_id
+                )
 
     def _index_source(
         self,
@@ -88,18 +144,58 @@ class IndexingService:
     ) -> IndexingResult:
 
         print()
-        print("=" * 70)
         print(
-            f"[Indexing] Starting source "
-            f"{source_id}"
+            "=" * 70
         )
-        print("=" * 70)
 
-        ingestion_result = (
-            ingestion_service.ingest_source(
-                source_id
+        print(
+            (
+                "[Indexing] Starting "
+                f"source {source_id}"
             )
         )
+
+        print(
+            "=" * 70
+        )
+
+        #
+        # INGESTION
+        #
+
+        with (
+            langfuse_service
+            .observation(
+                name="source-ingestion",
+                as_type="chain",
+                input_data={
+                    "source_id": (
+                        source_id
+                    ),
+                },
+            )
+        ) as ingestion_observation:
+
+            ingestion_result = (
+                ingestion_service
+                .ingest_source(
+                    source_id
+                )
+            )
+
+            ingestion_observation.update(
+                output=(
+                    asdict(
+                        ingestion_result
+                    )
+                ),
+                metadata={
+                    "status": (
+                        ingestion_result
+                        .status
+                    ),
+                },
+            )
 
         if (
             ingestion_result.status
@@ -108,7 +204,8 @@ class IndexingService:
             return IndexingResult(
                 source_id=source_id,
                 source_name=(
-                    ingestion_result.source_name
+                    ingestion_result
+                    .source_name
                 ),
                 status="failed",
                 documents_discovered=(
@@ -145,17 +242,56 @@ class IndexingService:
         )
 
         print(
-            "[Indexing] Starting "
-            "vectorization..."
+            (
+                "[Indexing] Starting "
+                "vectorization..."
+            )
         )
 
+        #
+        # VECTORISATION / EMBEDDINGS
+        #
+
         try:
-            chunks_created = (
-                vectorization_service
-                .vectorize_source(
-                    source_id
+            with (
+                langfuse_service
+                .observation(
+                    name=(
+                        "source-vectorization"
+                    ),
+                    as_type="embedding",
+                    input_data={
+                        "source_id": (
+                            source_id
+                        ),
+                    },
+                    model=(
+                        settings
+                        .embedding_model
+                    ),
+                    metadata={
+                        "device": (
+                            settings
+                            .embedding_device
+                        ),
+                    },
                 )
-            )
+            ) as vector_observation:
+
+                chunks_created = (
+                    vectorization_service
+                    .vectorize_source(
+                        source_id
+                    )
+                )
+
+                vector_observation.update(
+                    output={
+                        "chunks_created": (
+                            chunks_created
+                        ),
+                    }
+                )
 
         except Exception as exc:
             self._mark_source_failed(
@@ -165,14 +301,18 @@ class IndexingService:
 
             print()
             print(
-                f"[Indexing] Vectorization "
-                f"failed: {exc}"
+                (
+                    "[Indexing] "
+                    "Vectorization failed: "
+                    f"{exc}"
+                )
             )
 
             return IndexingResult(
                 source_id=source_id,
                 source_name=(
-                    ingestion_result.source_name
+                    ingestion_result
+                    .source_name
                 ),
                 status="failed",
                 documents_discovered=(
@@ -211,16 +351,23 @@ class IndexingService:
 
         print()
         print(
-            "[Indexing] Source is ready "
-            "for RAG."
+            (
+                "[Indexing] Source "
+                "is ready for RAG."
+            )
         )
-        print("=" * 70)
+
+        print(
+            "=" * 70
+        )
+
         print()
 
         return IndexingResult(
             source_id=source_id,
             source_name=(
-                ingestion_result.source_name
+                ingestion_result
+                .source_name
             ),
             status="indexed",
             documents_discovered=(
@@ -255,7 +402,9 @@ class IndexingService:
         self,
         source_id: int,
     ) -> bool:
+
         with self._lock:
+
             if (
                 source_id
                 in self._active_sources
@@ -272,6 +421,7 @@ class IndexingService:
         self,
         source_id: int,
     ) -> None:
+
         with self._lock:
             self._active_sources.discard(
                 source_id
@@ -281,6 +431,7 @@ class IndexingService:
     def _get_source_name(
         source_id: int,
     ) -> str:
+
         with SessionLocal() as session:
             repository = (
                 SourceRepository(
@@ -304,6 +455,7 @@ class IndexingService:
         source_id: int,
         error: str,
     ) -> None:
+
         with SessionLocal() as session:
             repository = (
                 SourceRepository(
@@ -333,6 +485,7 @@ class IndexingService:
     def _mark_source_indexed(
         source_id: int,
     ) -> None:
+
         with SessionLocal() as session:
             repository = (
                 SourceRepository(
@@ -365,4 +518,6 @@ class IndexingService:
             session.commit()
 
 
-indexing_service = IndexingService()
+indexing_service = (
+    IndexingService()
+)

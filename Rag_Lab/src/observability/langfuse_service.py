@@ -1,8 +1,6 @@
 import logging
 
-from contextlib import (
-    contextmanager,
-)
+from contextlib import contextmanager
 
 import httpx
 
@@ -11,9 +9,7 @@ from langfuse import (
     propagate_attributes,
 )
 
-from src.config import (
-    settings,
-)
+from src.config import settings
 
 
 logger = logging.getLogger(
@@ -22,7 +18,16 @@ logger = logging.getLogger(
 
 
 class _NoopObservation:
+
     trace_id = None
+    id = None
+
+    @property
+    def observation_id(self):
+        return None
+
+    def child_trace_context(self):
+        return None
 
     def update(
         self,
@@ -37,21 +42,45 @@ class _SafeObservation:
         self,
         observation,
     ) -> None:
-
-        self._observation = (
-            observation
-        )
+        self._observation = observation
 
     @property
-    def trace_id(
-        self,
-    ):
-
+    def trace_id(self):
         return getattr(
             self._observation,
             "trace_id",
             None,
         )
+
+    @property
+    def id(self):
+        return getattr(
+            self._observation,
+            "id",
+            None,
+        )
+
+    @property
+    def observation_id(self):
+        return self.id
+
+    def child_trace_context(
+        self,
+    ) -> dict | None:
+
+        trace_id = self.trace_id
+        observation_id = self.id
+
+        if (
+            not trace_id
+            or not observation_id
+        ):
+            return None
+
+        return {
+            "trace_id": trace_id,
+            "parent_span_id": observation_id,
+        }
 
     def update(
         self,
@@ -59,13 +88,11 @@ class _SafeObservation:
     ) -> None:
 
         try:
-
             self._observation.update(
                 **kwargs
             )
 
         except Exception:
-
             logger.exception(
                 (
                     "Could not update "
@@ -79,7 +106,6 @@ class LangfuseService:
     def __init__(
         self,
     ) -> None:
-
         self._client: (
             Langfuse
             | None
@@ -89,7 +115,6 @@ class LangfuseService:
     def enabled(
         self,
     ) -> bool:
-
         return bool(
             settings.langfuse_enabled
         )
@@ -98,11 +123,9 @@ class LangfuseService:
     def configured(
         self,
     ) -> bool:
-
         return bool(
             settings.langfuse_public_key
-            and
-            settings.langfuse_secret_key
+            and settings.langfuse_secret_key
         )
 
     @property
@@ -111,19 +134,15 @@ class LangfuseService:
     ) -> Langfuse:
 
         if not self.enabled:
-
             raise RuntimeError(
                 "Langfuse is disabled."
             )
 
         if not self.configured:
-
             raise RuntimeError(
                 (
                     "Langfuse credentials "
-                    "are not configured. "
-                    "Set LANGFUSE_PUBLIC_KEY "
-                    "and LANGFUSE_SECRET_KEY."
+                    "are not configured."
                 )
             )
 
@@ -131,15 +150,11 @@ class LangfuseService:
 
             logger.info(
                 (
-                    "Initializing Langfuse "
-                    "client | "
+                    "Initializing Langfuse client | "
                     "base_url=%s | "
                     "environment=%s"
                 ),
-                (
-                    settings
-                    .langfuse_base_url
-                ),
+                settings.langfuse_base_url,
                 (
                     settings
                     .langfuse_tracing_environment
@@ -176,7 +191,7 @@ class LangfuseService:
         return self._client
 
     #
-    # PUBLIC REST API CHECK
+    # PUBLIC API
     #
 
     def test_connection(
@@ -187,48 +202,35 @@ class LangfuseService:
     ]:
 
         if not self.enabled:
-
             return (
                 False,
                 "Langfuse is disabled.",
             )
 
         if not self.configured:
-
             return (
                 False,
                 (
                     "Langfuse credentials "
-                    "are not configured. "
-                    "Check LANGFUSE_PUBLIC_KEY "
-                    "and LANGFUSE_SECRET_KEY."
+                    "are not configured."
                 ),
             )
 
-        base_url = (
+        endpoint = (
             settings
             .langfuse_base_url
             .rstrip("/")
-        )
-
-        endpoint = (
-            f"{base_url}"
-            "/api/public/projects"
+            + "/api/public/projects"
         )
 
         try:
-
             response = httpx.get(
                 endpoint,
                 auth=httpx.BasicAuth(
-                    (
-                        settings
-                        .langfuse_public_key
-                    ),
-                    (
-                        settings
-                        .langfuse_secret_key
-                    ),
+                    settings
+                    .langfuse_public_key,
+                    settings
+                    .langfuse_secret_key,
                 ),
                 timeout=(
                     settings
@@ -243,9 +245,7 @@ class LangfuseService:
 
             response.raise_for_status()
 
-            payload = (
-                response.json()
-            )
+            payload = response.json()
 
             projects = (
                 payload.get(
@@ -266,8 +266,7 @@ class LangfuseService:
                         "",
                     )
                 ).strip()
-                for project
-                in projects
+                for project in projects
                 if (
                     isinstance(
                         project,
@@ -280,7 +279,6 @@ class LangfuseService:
             ]
 
             if project_names:
-
                 message = (
                     "Connected to Langfuse API. "
                     "Project: "
@@ -288,7 +286,6 @@ class LangfuseService:
                 )
 
             else:
-
                 message = (
                     "Connected to Langfuse API."
                 )
@@ -303,7 +300,6 @@ class LangfuseService:
             )
 
         except Exception as exc:
-
             logger.exception(
                 (
                     "Langfuse API "
@@ -341,30 +337,17 @@ class LangfuseService:
     ):
 
         if not self.enabled:
-
-            yield (
-                _NoopObservation()
-            )
-
+            yield _NoopObservation()
             return
 
         try:
-
-            client = (
-                self.client
-            )
-
             manager = (
-                client
+                self.client
                 .start_as_current_observation(
                     as_type="span",
                     name=name,
-                    input=(
-                        input_data
-                    ),
-                    metadata=(
-                        metadata
-                    ),
+                    input=input_data,
+                    metadata=metadata,
                 )
             )
 
@@ -373,7 +356,6 @@ class LangfuseService:
             )
 
         except Exception:
-
             logger.exception(
                 (
                     "Could not start "
@@ -383,10 +365,7 @@ class LangfuseService:
                 name,
             )
 
-            yield (
-                _NoopObservation()
-            )
-
+            yield _NoopObservation()
             return
 
         observation = (
@@ -402,19 +381,16 @@ class LangfuseService:
         }
 
         if session_id:
-
             propagation_kwargs[
                 "session_id"
             ] = session_id
 
         if tags:
-
             propagation_kwargs[
                 "tags"
             ] = tags
 
         try:
-
             propagation_manager = (
                 propagate_attributes(
                     **propagation_kwargs
@@ -424,27 +400,23 @@ class LangfuseService:
             propagation_manager.__enter__()
 
         except Exception:
-
-            propagation_manager = None
-
             logger.exception(
                 (
                     "Could not propagate "
-                    "Langfuse trace "
-                    "attributes | "
+                    "Langfuse attributes | "
                     "name=%s"
                 ),
                 name,
             )
 
+            propagation_manager = None
+
         error = None
 
         try:
-
             yield observation
 
         except BaseException as exc:
-
             error = exc
 
             observation.update(
@@ -462,9 +434,7 @@ class LangfuseService:
                 propagation_manager
                 is not None
             ):
-
                 try:
-
                     propagation_manager.__exit__(
                         (
                             type(error)
@@ -480,17 +450,15 @@ class LangfuseService:
                     )
 
                 except Exception:
-
                     logger.exception(
                         (
                             "Could not close "
                             "Langfuse attribute "
-                            "propagation context."
+                            "context."
                         )
                     )
 
             try:
-
                 manager.__exit__(
                     (
                         type(error)
@@ -506,7 +474,6 @@ class LangfuseService:
                 )
 
             except Exception:
-
                 logger.exception(
                     (
                         "Could not close "
@@ -520,7 +487,6 @@ class LangfuseService:
                 settings
                 .langfuse_flush_after_request
             ):
-
                 self.flush()
 
     #
@@ -546,36 +512,30 @@ class LangfuseService:
             dict
             | None
         ) = None,
+        trace_context: (
+            dict
+            | None
+        ) = None,
     ):
 
         if not self.enabled:
-
-            yield (
-                _NoopObservation()
-            )
-
+            yield _NoopObservation()
             return
 
         try:
-
-            client = (
-                self.client
-            )
-
             manager = (
-                client
+                self.client
                 .start_as_current_observation(
                     as_type=as_type,
                     name=name,
-                    input=(
-                        input_data
-                    ),
-                    metadata=(
-                        metadata
-                    ),
+                    input=input_data,
+                    metadata=metadata,
                     model=model,
                     model_parameters=(
                         model_parameters
+                    ),
+                    trace_context=(
+                        trace_context
                     ),
                 )
             )
@@ -585,22 +545,17 @@ class LangfuseService:
             )
 
         except Exception:
-
             logger.exception(
                 (
                     "Could not start "
                     "Langfuse observation | "
-                    "name=%s | "
-                    "type=%s"
+                    "name=%s | type=%s"
                 ),
                 name,
                 as_type,
             )
 
-            yield (
-                _NoopObservation()
-            )
-
+            yield _NoopObservation()
             return
 
         observation = (
@@ -612,11 +567,9 @@ class LangfuseService:
         error = None
 
         try:
-
             yield observation
 
         except BaseException as exc:
-
             error = exc
 
             observation.update(
@@ -629,9 +582,7 @@ class LangfuseService:
             raise
 
         finally:
-
             try:
-
                 manager.__exit__(
                     (
                         type(error)
@@ -647,7 +598,6 @@ class LangfuseService:
                 )
 
             except Exception:
-
                 logger.exception(
                     (
                         "Could not close "
@@ -665,15 +615,12 @@ class LangfuseService:
             not self.enabled
             or self._client is None
         ):
-
             return
 
         try:
-
             self._client.flush()
 
         except Exception:
-
             logger.exception(
                 (
                     "Could not flush "
@@ -686,15 +633,12 @@ class LangfuseService:
     ) -> None:
 
         if self._client is None:
-
             return
 
         try:
-
             self._client.shutdown()
 
         except Exception:
-
             logger.exception(
                 (
                     "Could not shut down "

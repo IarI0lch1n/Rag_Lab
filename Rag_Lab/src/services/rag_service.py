@@ -42,17 +42,10 @@ class RagSource:
     document_title: str
     chunk_index: int
 
-    reference: (
-        str
-        | None
-    )
+    reference: str | None
 
     vector_score: float
-
-    rerank_score: (
-        float
-        | None
-    )
+    rerank_score: float | None
 
 
 @dataclass(frozen=True)
@@ -109,6 +102,10 @@ class RagService:
             | str
             | None
         ) = None,
+        trace_context: (
+            dict
+            | None
+        ) = None,
     ) -> RagAnswer:
 
         question = (
@@ -116,36 +113,20 @@ class RagService:
         )
 
         if not question:
-
             raise ValueError(
-                (
-                    "Question cannot "
-                    "be empty."
-                )
+                "Question cannot be empty."
             )
 
-        history = (
-            history
-            or []
-        )
+        history = history or []
 
-        langfuse_session_id = (
-            f"advisor-chat-{session_id}"
-            if session_id
-            is not None
-            else None
-        )
-
-        trace_input = {
-            "question": (
-                question
-            ),
+        input_data = {
+            "question": question,
             "history_messages": (
                 len(history)
             ),
         }
 
-        trace_metadata = {
+        metadata = {
             "requested_provider": (
                 llm_provider
                 or "default"
@@ -165,36 +146,51 @@ class RagService:
             ),
         }
 
-        with (
-            langfuse_service
-            .trace(
-                name=(
-                    "advisor-rag-query"
-                ),
-                input_data=(
-                    trace_input
-                ),
-                session_id=(
-                    langfuse_session_id
-                ),
-                metadata=(
-                    trace_metadata
-                ),
-                tags=[
-                    "advisor",
-                    "rag",
-                ],
+        if trace_context:
+            context = (
+                langfuse_service
+                .observation(
+                    name="rag-pipeline",
+                    as_type="chain",
+                    input_data=input_data,
+                    metadata=metadata,
+                    trace_context=(
+                        trace_context
+                    ),
+                )
             )
-        ) as trace:
 
+        else:
+            langfuse_session_id = (
+                f"advisor-chat-{session_id}"
+                if session_id
+                is not None
+                else None
+            )
+
+            context = (
+                langfuse_service
+                .trace(
+                    name=(
+                        "advisor-rag-query"
+                    ),
+                    input_data=input_data,
+                    session_id=(
+                        langfuse_session_id
+                    ),
+                    metadata=metadata,
+                    tags=[
+                        "advisor",
+                        "rag",
+                    ],
+                )
+            )
+
+        with context as pipeline:
             return (
                 self._ask_inside_trace(
-                    question=(
-                        question
-                    ),
-                    history=(
-                        history
-                    ),
+                    question=question,
+                    history=history,
                     llm_provider=(
                         llm_provider
                     ),
@@ -202,7 +198,7 @@ class RagService:
                         llm_model
                     ),
                     trace=(
-                        trace
+                        pipeline
                     ),
                 )
             )
@@ -233,19 +229,13 @@ class RagService:
         )
 
         print()
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
 
         print(
-            (
-                "[RAG] Question: "
-                f"{question}"
-            )
+            f"[RAG] Question: {question}"
         )
 
         if llm_provider:
-
             print(
                 (
                     "[RAG] LLM provider: "
@@ -254,7 +244,6 @@ class RagService:
             )
 
         if llm_model:
-
             print(
                 (
                     "[RAG] LLM model: "
@@ -262,12 +251,10 @@ class RagService:
                 )
             )
 
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
 
         #
-        # 1. RETRIEVAL
+        # RETRIEVAL
         #
 
         retrieval_started = (
@@ -277,23 +264,15 @@ class RagService:
         with (
             langfuse_service
             .observation(
-                name=(
-                    "rag-retrieval"
-                ),
-                as_type=(
-                    "retriever"
-                ),
+                name="rag-retrieval",
+                as_type="retriever",
                 input_data={
-                    "query": (
-                        question
-                    ),
+                    "query": question,
                     "candidate_limit": (
-                        self
-                        .CANDIDATE_COUNT
+                        self.CANDIDATE_COUNT
                     ),
                     "qdrant_limit": (
-                        self
-                        .QDRANT_LIMIT
+                        self.QDRANT_LIMIT
                     ),
                     "max_per_document": (
                         self
@@ -312,8 +291,7 @@ class RagService:
                         .CANDIDATE_COUNT
                     ),
                     qdrant_limit=(
-                        self
-                        .QDRANT_LIMIT
+                        self.QDRANT_LIMIT
                     ),
                     max_per_document=(
                         self
@@ -334,8 +312,7 @@ class RagService:
                         len(candidates)
                     ),
                     "candidates": (
-                        self
-                        ._trace_chunks(
+                        self._trace_chunks(
                             candidates
                         )
                     ),
@@ -362,7 +339,7 @@ class RagService:
         )
 
         #
-        # 2. RERANK
+        # RERANK
         #
 
         rerank_started = (
@@ -372,14 +349,10 @@ class RagService:
         with (
             langfuse_service
             .observation(
-                name=(
-                    "rag-reranking"
-                ),
+                name="rag-reranking",
                 as_type="span",
                 input_data={
-                    "query": (
-                        question
-                    ),
+                    "query": question,
                     "candidate_count": (
                         len(candidates)
                     ),
@@ -392,7 +365,6 @@ class RagService:
         ) as rerank_observation:
 
             if candidates:
-
                 reranked = (
                     reranker.rerank(
                         query=question,
@@ -407,7 +379,6 @@ class RagService:
                 )
 
             else:
-
                 reranked = []
 
             rerank_seconds = (
@@ -421,8 +392,7 @@ class RagService:
                         len(reranked)
                     ),
                     "results": (
-                        self
-                        ._trace_chunks(
+                        self._trace_chunks(
                             reranked
                         )
                     ),
@@ -441,15 +411,8 @@ class RagService:
             )
         )
 
-        print(
-            (
-                "[RAG] Reranked results: "
-                f"{len(reranked)}"
-            )
-        )
-
         #
-        # 3. LIMIT CONTEXT
+        # CONTEXT
         #
 
         selected_results = (
@@ -458,26 +421,14 @@ class RagService:
             )
         )
 
-        print(
-            (
-                "[RAG] Context chunks: "
-                f"{len(selected_results)}"
-            )
-        )
-
-        #
-        # 4. PROMPT SOURCES
-        #
-
         prompt_sources = (
-            self
-            ._build_prompt_sources(
+            self._build_prompt_sources(
                 selected_results
             )
         )
 
         #
-        # 5. PROMPT CONSTRUCTION
+        # PROMPT
         #
 
         with (
@@ -488,13 +439,9 @@ class RagService:
                 ),
                 as_type="chain",
                 input_data={
-                    "question": (
-                        question
-                    ),
+                    "question": question,
                     "source_count": (
-                        len(
-                            prompt_sources
-                        )
+                        len(prompt_sources)
                     ),
                     "history_messages": (
                         len(history)
@@ -509,9 +456,7 @@ class RagService:
                     sources=(
                         prompt_sources
                     ),
-                    history=(
-                        history
-                    ),
+                    history=history,
                 )
             )
 
@@ -529,8 +474,7 @@ class RagService:
                         in selected_results
                     ),
                     "sources": (
-                        self
-                        ._trace_chunks(
+                        self._trace_chunks(
                             selected_results
                         )
                     ),
@@ -538,7 +482,7 @@ class RagService:
             )
 
         #
-        # 6. LLM GENERATION
+        # GENERATION
         #
 
         generation_started = (
@@ -551,9 +495,7 @@ class RagService:
                 name=(
                     "rag-llm-generation"
                 ),
-                as_type=(
-                    "generation"
-                ),
+                as_type="generation",
                 input_data={
                     "system_prompt": (
                         SYSTEM_PROMPT
@@ -579,9 +521,7 @@ class RagService:
                     system_prompt=(
                         SYSTEM_PROMPT
                     ),
-                    user_prompt=(
-                        prompt
-                    ),
+                    user_prompt=prompt,
                     provider=(
                         llm_provider
                     ),
@@ -640,9 +580,7 @@ class RagService:
             )
         )
 
-        print(
-            "=" * 80
-        )
+        print("=" * 80)
 
         sources = (
             self._build_sources(
@@ -651,18 +589,10 @@ class RagService:
         )
 
         answer = RagAnswer(
-            answer=(
-                response.text
-            ),
-            sources=(
-                sources
-            ),
-            provider=(
-                response.provider
-            ),
-            model=(
-                response.model
-            ),
+            answer=response.text,
+            sources=sources,
+            provider=response.provider,
+            model=response.model,
             retrieval_seconds=(
                 retrieval_seconds
             ),
@@ -677,19 +607,13 @@ class RagService:
             ),
         )
 
-        #
-        # Root trace output.
-        #
-
         trace.update(
             output={
                 "answer": (
                     answer.answer
                 ),
                 "source_count": (
-                    len(
-                        answer.sources
-                    )
+                    len(answer.sources)
                 ),
                 "sources": [
                     {
@@ -709,7 +633,8 @@ class RagService:
                             source.source_name
                         ),
                         "document_title": (
-                            source.document_title
+                            source
+                            .document_title
                         ),
                         "reference": (
                             source.reference
@@ -756,26 +681,22 @@ class RagService:
     ]:
 
         if not results:
-
             return []
 
         selected = []
-
         total_chars = 0
 
         for result in results:
-
             text = (
                 result.text
                 or ""
             ).strip()
 
             if not text:
-
                 continue
 
-            content_length = (
-                len(text)
+            content_length = len(
+                text
             )
 
             if (
@@ -787,7 +708,6 @@ class RagService:
                     .MAX_CONTEXT_CHARS
                 )
             ):
-
                 break
 
             selected.append(
@@ -818,29 +738,24 @@ class RagService:
             results,
             start=1,
         ):
-
             sources.append(
                 PromptSource(
                     citation=(
                         f"S{index}"
                     ),
                     source_name=(
-                        result
-                        .source_name
+                        result.source_name
                     ),
                     document_title=(
                         result
                         .document_title
                     ),
                     reference=(
-                        self
-                        ._get_reference(
+                        self._get_reference(
                             result
                         )
                     ),
-                    text=(
-                        result.text
-                    ),
+                    text=result.text,
                 )
             )
 
@@ -864,7 +779,6 @@ class RagService:
             results,
             start=1,
         ):
-
             sources.append(
                 RagSource(
                     citation=(
@@ -893,8 +807,7 @@ class RagService:
                         result.chunk_index
                     ),
                     reference=(
-                        self
-                        ._get_reference(
+                        self._get_reference(
                             result
                         )
                     ),
@@ -915,65 +828,52 @@ class RagService:
         results: list[
             RetrievedChunk
         ],
-    ) -> list[
-        dict
-    ]:
+    ) -> list[dict]:
 
-        traced = []
-
-        for result in results:
-
-            traced.append(
-                {
-                    "source_id": (
-                        result.source_id
-                    ),
-                    "document_id": (
-                        result.document_id
-                    ),
-                    "chunk_id": (
-                        result.chunk_id
-                    ),
-                    "chunk_index": (
-                        result.chunk_index
-                    ),
-                    "source_name": (
-                        result.source_name
-                    ),
-                    "document_title": (
-                        result.document_title
-                    ),
-                    "reference": (
-                        self
-                        ._get_reference(
-                            result
-                        )
-                    ),
-                    "vector_score": (
-                        result.score
-                    ),
-                    "rerank_score": (
+        return [
+            {
+                "source_id": (
+                    result.source_id
+                ),
+                "document_id": (
+                    result.document_id
+                ),
+                "chunk_id": (
+                    result.chunk_id
+                ),
+                "chunk_index": (
+                    result.chunk_index
+                ),
+                "source_name": (
+                    result.source_name
+                ),
+                "document_title": (
+                    result.document_title
+                ),
+                "reference": (
+                    self._get_reference(
                         result
-                        .rerank_score
-                    ),
-                }
-            )
-
-        return traced
+                    )
+                ),
+                "vector_score": (
+                    result.score
+                ),
+                "rerank_score": (
+                    result.rerank_score
+                ),
+            }
+            for result in results
+        ]
 
     @staticmethod
     def _get_reference(
         result: RetrievedChunk,
-    ) -> (
-        str
-        | None
-    ):
+    ) -> str | None:
 
         if (
             result.source_type
             == "web"
         ):
-
             return (
                 result.external_id
                 or result.source_uri
@@ -983,12 +883,10 @@ class RagService:
             result.source_type
             == "git"
         ):
-
             if (
                 result.source_uri
                 and result.external_id
             ):
-
                 return (
                     f"{result.source_uri}"
                     f" -> "
@@ -1004,7 +902,6 @@ class RagService:
             result.source_type
             == "file"
         ):
-
             return (
                 result.document_title
                 or result.external_id
@@ -1017,6 +914,4 @@ class RagService:
         )
 
 
-rag_service = (
-    RagService()
-)
+rag_service = RagService()

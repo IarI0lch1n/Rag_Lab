@@ -1,6 +1,8 @@
 import logging
 import re
 
+from contextlib import nullcontext
+
 from dataclasses import (
     asdict,
     dataclass,
@@ -8,6 +10,10 @@ from dataclasses import (
 
 from urllib.parse import (
     urlsplit,
+)
+
+from src.observability.langfuse_service import (
+    langfuse_service,
 )
 
 from src.services.internet_research_service import (
@@ -22,25 +28,17 @@ logger = logging.getLogger(
 
 @dataclass(frozen=True)
 class AutoResearchSource:
-
     title: str
-
     url: str
-
     status: str
-
     source_id: int | None = None
-
     error: str | None = None
 
 
 @dataclass(frozen=True)
 class AutoResearchReport:
-
     query: str
-
     hits_found: int
-
     sources: list[
         AutoResearchSource
     ]
@@ -49,57 +47,40 @@ class AutoResearchReport:
     def indexed_count(
         self,
     ) -> int:
-
         return sum(
             1
-            for source
-            in self.sources
-            if (
-                source.status
-                == "indexed"
-            )
+            for source in self.sources
+            if source.status
+            == "indexed"
         )
 
     @property
     def duplicate_count(
         self,
     ) -> int:
-
         return sum(
             1
-            for source
-            in self.sources
-            if (
-                source.status
-                == "duplicate"
-            )
+            for source in self.sources
+            if source.status
+            == "duplicate"
         )
 
     def to_dict(
         self,
     ) -> dict:
-
         return {
-            "query": (
-                self.query
-            ),
-
+            "query": self.query,
             "hits_found": (
                 self.hits_found
             ),
-
             "indexed_count": (
                 self.indexed_count
             ),
-
             "duplicate_count": (
                 self.duplicate_count
             ),
-
             "sources": [
-                asdict(
-                    source
-                )
+                asdict(source)
                 for source
                 in self.sources
             ],
@@ -113,12 +94,6 @@ class AutoResearchService:
     MAX_IMPORT_ATTEMPTS = 3
 
     TARGET_INDEXED_SOURCES = 1
-
-    #
-    # These sites may be useful search
-    # results, but are poor candidates
-    # for automatic crawling.
-    #
 
     BLOCKED_AUTO_DOMAINS = {
         "steamcommunity.com",
@@ -139,7 +114,6 @@ class AutoResearchService:
             r"(?:\s+то)?"
             r"[\s,:;-]*"
         ),
-
         (
             r"^\s*(?:please\s+)?"
             r"(?:search|find|look\s+up)"
@@ -156,6 +130,16 @@ class AutoResearchService:
     def research(
         self,
         question: str,
+        *,
+        trace_context: (
+            dict
+            | None
+        ) = None,
+        session_id: (
+            int
+            | str
+            | None
+        ) = None,
     ) -> AutoResearchReport:
 
         question = (
@@ -164,7 +148,6 @@ class AutoResearchService:
         ).strip()
 
         if not question:
-
             raise ValueError(
                 (
                     "Research question "
@@ -177,6 +160,91 @@ class AutoResearchService:
                 question
             )
         )
+
+        input_data = {
+            "question": question,
+            "query": web_query,
+            "search_results_limit": (
+                self.SEARCH_RESULTS
+            ),
+            "max_import_attempts": (
+                self.MAX_IMPORT_ATTEMPTS
+            ),
+            "target_indexed_sources": (
+                self
+                .TARGET_INDEXED_SOURCES
+            ),
+        }
+
+        if trace_context:
+            context = (
+                langfuse_service
+                .observation(
+                    name="web-recon",
+                    as_type="chain",
+                    input_data=input_data,
+                    trace_context=(
+                        trace_context
+                    ),
+                )
+            )
+
+        else:
+            langfuse_session_id = (
+                f"advisor-chat-{session_id}"
+                if session_id
+                is not None
+                else None
+            )
+
+            context = (
+                langfuse_service
+                .trace(
+                    name=(
+                        "advisor-web-recon"
+                    ),
+                    input_data=input_data,
+                    session_id=(
+                        langfuse_session_id
+                    ),
+                    tags=[
+                        "advisor",
+                        "web-recon",
+                    ],
+                )
+            )
+
+        with context as observation:
+            report = (
+                self._research(
+                    web_query
+                )
+            )
+
+            observation.update(
+                output=(
+                    report.to_dict()
+                ),
+                metadata={
+                    "hits_found": (
+                        report.hits_found
+                    ),
+                    "indexed_count": (
+                        report.indexed_count
+                    ),
+                    "duplicate_count": (
+                        report
+                        .duplicate_count
+                    ),
+                },
+            )
+
+            return report
+
+    def _research(
+        self,
+        web_query: str,
+    ) -> AutoResearchReport:
 
         logger.info(
             (
@@ -201,8 +269,7 @@ class AutoResearchService:
             (
                 "Automatic web search "
                 "completed | "
-                "query=%s | "
-                "hits=%s"
+                "query=%s | hits=%s"
             ),
             web_query,
             len(hits),
@@ -211,17 +278,13 @@ class AutoResearchService:
         processed_sources = []
 
         if not hits:
-
-            return (
-                AutoResearchReport(
-                    query=web_query,
-                    hits_found=0,
-                    sources=[],
-                )
+            return AutoResearchReport(
+                query=web_query,
+                hits_found=0,
+                sources=[],
             )
 
         attempts = 0
-
         indexed = 0
 
         for hit in hits:
@@ -231,7 +294,6 @@ class AutoResearchService:
                 >= self
                 .MAX_IMPORT_ATTEMPTS
             ):
-
                 break
 
             if (
@@ -239,16 +301,11 @@ class AutoResearchService:
                 >= self
                 .TARGET_INDEXED_SOURCES
             ):
-
                 break
 
-            if (
-                self
-                ._is_blocked_domain(
-                    hit.url
-                )
+            if self._is_blocked_domain(
+                hit.url
             ):
-
                 logger.info(
                     (
                         "Skipping automatic "
@@ -281,37 +338,33 @@ class AutoResearchService:
                 (
                     "Evaluating web source | "
                     "attempt=%s/%s | "
-                    "title=%s | "
-                    "url=%s"
+                    "title=%s | url=%s"
                 ),
                 attempts,
-                self
-                .MAX_IMPORT_ATTEMPTS,
+                (
+                    self
+                    .MAX_IMPORT_ATTEMPTS
+                ),
                 hit.title,
                 hit.url,
             )
 
             try:
-
                 result = (
                     internet_research_service
                     .import_hit(
                         hit,
                         single_page=True,
-                        cleanup_on_failure=(
-                            True
-                        ),
+                        cleanup_on_failure=True,
                     )
                 )
 
             except Exception as exc:
-
                 logger.exception(
                     (
                         "Automatic web "
                         "source processing "
-                        "crashed | "
-                        "url=%s"
+                        "crashed | url=%s"
                     ),
                     hit.url,
                 )
@@ -332,8 +385,7 @@ class AutoResearchService:
                     title=hit.title,
                     url=hit.url,
                     source_id=(
-                        result
-                        .source_id
+                        result.source_id
                     ),
                     status=(
                         result.status
@@ -348,7 +400,6 @@ class AutoResearchService:
                 result.status
                 == "indexed"
             ):
-
                 indexed += 1
 
                 logger.info(
@@ -366,7 +417,6 @@ class AutoResearchService:
                 result.status
                 == "duplicate"
             ):
-
                 logger.info(
                     (
                         "Web source already "
@@ -377,7 +427,6 @@ class AutoResearchService:
                 )
 
             else:
-
                 logger.warning(
                     (
                         "Web source could "
@@ -391,16 +440,10 @@ class AutoResearchService:
                     result.error,
                 )
 
-        report = (
-            AutoResearchReport(
-                query=web_query,
-                hits_found=(
-                    len(hits)
-                ),
-                sources=(
-                    processed_sources
-                ),
-            )
+        report = AutoResearchReport(
+            query=web_query,
+            hits_found=len(hits),
+            sources=processed_sources,
         )
 
         logger.info(
@@ -413,9 +456,7 @@ class AutoResearchService:
                 "duplicates=%s"
             ),
             report.hits_found,
-            len(
-                report.sources
-            ),
+            len(report.sources),
             report.indexed_count,
             report.duplicate_count,
         )
@@ -439,8 +480,7 @@ class AutoResearchService:
             (
                 hostname == domain
                 or hostname.endswith(
-                    "."
-                    + domain
+                    "." + domain
                 )
             )
             for domain
@@ -454,23 +494,18 @@ class AutoResearchService:
         question: str,
     ) -> str:
 
-        query = (
-            question.strip()
-        )
+        query = question.strip()
 
         for pattern in (
             cls
             .SEARCH_PREFIX_PATTERNS
         ):
-
             query = re.sub(
                 pattern,
                 "",
                 query,
                 count=1,
-                flags=(
-                    re.IGNORECASE
-                ),
+                flags=re.IGNORECASE,
             )
 
         query = re.sub(
@@ -482,16 +517,11 @@ class AutoResearchService:
         )
 
         if not query:
-
-            query = question.strip()
-
-        #
-        # Avoid sending huge conversational
-        # instructions to the search engine.
-        #
+            query = (
+                question.strip()
+            )
 
         if len(query) > 240:
-
             shortened = (
                 query[:240]
                 .rsplit(
@@ -502,22 +532,20 @@ class AutoResearchService:
             )
 
             if shortened:
-
                 query = shortened
 
         if (
             "frostpunk"
             not in query.casefold()
         ):
-
             query = (
                 f"Frostpunk {query}"
             )
 
         logger.info(
             (
-                "Prepared web search query | "
-                "query=%s"
+                "Prepared web search "
+                "query | query=%s"
             ),
             query,
         )

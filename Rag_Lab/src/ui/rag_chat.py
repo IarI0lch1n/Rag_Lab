@@ -5,6 +5,10 @@ from nicegui import (
     ui,
 )
 
+from src.observability.langfuse_service import (
+    langfuse_service,
+)
+
 from src.repositories.chat_repository import (
     chat_repository,
 )
@@ -37,27 +41,19 @@ class RagChat:
         self,
     ) -> None:
 
-        self.session_id: (
-            int
-            | None
-        ) = None
+        self.session_id: int | None = None
 
         self.session_title = (
             "New consultation"
         )
 
         self.messages_container = None
-
         self.empty_state = None
-
         self.session_label = None
 
         self.question_input = None
-
         self.send_button = None
-
         self.new_chat_button = None
-
         self.web_recon_checkbox = None
 
         self.is_busy = False
@@ -71,16 +67,17 @@ class RagChat:
     ) -> None:
 
         logger.info(
-            (
-                "Initializing "
-                "Advisor chat UI."
-            )
+            "Initializing Advisor chat UI."
         )
 
-        with ui.column().classes(
-            "w-full h-full gap-0"
-        ).style(
-            "min-height: 0;"
+        with (
+            ui.column()
+            .classes(
+                "w-full h-full gap-0"
+            )
+            .style(
+                "min-height: 0;"
+            )
         ):
 
             #
@@ -92,10 +89,6 @@ class RagChat:
             ):
 
                 llm_selector.render()
-
-                #
-                # CHAT OPTIONS
-                #
 
                 with ui.row().classes(
                     (
@@ -137,13 +130,8 @@ class RagChat:
 
                     self.new_chat_button = (
                         ui.button(
-                            (
-                                "New "
-                                "consultation"
-                            ),
-                            icon=(
-                                "add_comment"
-                            ),
+                            "New consultation",
+                            icon="add_comment",
                             on_click=(
                                 self.new_chat
                             ),
@@ -193,27 +181,30 @@ class RagChat:
             # INPUT
             #
 
-            with ui.row().classes(
-                (
-                    "w-full "
-                    "q-pa-md "
-                    "items-center "
-                    "gap-2"
+            with (
+                ui.row()
+                .classes(
+                    (
+                        "w-full "
+                        "q-pa-md "
+                        "items-center "
+                        "gap-2"
+                    )
                 )
-            ).style(
-                (
-                    "background: "
-                    "rgba(12, 18, 21, 0.96); "
-                    "border-top: "
-                    "1px solid #344750;"
+                .style(
+                    (
+                        "background: "
+                        "rgba(12, 18, 21, 0.96); "
+                        "border-top: "
+                        "1px solid #344750;"
+                    )
                 )
             ):
 
                 self.question_input = (
                     ui.input(
                         placeholder=(
-                            "Consult the "
-                            "Advisor..."
+                            "Consult the Advisor..."
                         ),
                     )
                     .props(
@@ -251,7 +242,7 @@ class RagChat:
         await self.send_message()
 
     #
-    # SEND
+    # SEND MESSAGE
     #
 
     async def send_message(
@@ -277,7 +268,6 @@ class RagChat:
         ).strip()
 
         if not question:
-
             return
 
         provider = (
@@ -290,8 +280,7 @@ class RagChat:
 
         use_web_recon = bool(
             self.web_recon_checkbox
-            and
-            self.web_recon_checkbox.value
+            and self.web_recon_checkbox.value
         )
 
         if (
@@ -327,8 +316,7 @@ class RagChat:
         )
 
         #
-        # Load previous conversation
-        # before storing current question.
+        # LOAD CHAT HISTORY
         #
 
         if (
@@ -346,8 +334,7 @@ class RagChat:
                             self.session_id
                         ),
                         limit=(
-                            self
-                            .HISTORY_LIMIT
+                            self.HISTORY_LIMIT
                         ),
                     )
                 )
@@ -391,8 +378,7 @@ class RagChat:
             history_for_rag = []
 
         #
-        # Create consultation only when
-        # first real message is sent.
+        # CREATE CHAT SESSION
         #
 
         if (
@@ -441,10 +427,7 @@ class RagChat:
             except Exception:
 
                 logger.exception(
-                    (
-                        "Could not create "
-                        "consultation."
-                    )
+                    "Could not create consultation."
                 )
 
                 ui.notify(
@@ -458,8 +441,7 @@ class RagChat:
                 return
 
         #
-        # Store user message BEFORE any
-        # network / RAG operations.
+        # SAVE USER MESSAGE
         #
 
         try:
@@ -520,14 +502,12 @@ class RagChat:
         (
             loading_row,
             loading_status,
-        ) = (
-            self._append_loading_message(
-                provider=provider,
-                model=model,
-                web_recon=(
-                    use_web_recon
-                ),
-            )
+        ) = self._append_loading_message(
+            provider=provider,
+            model=model,
+            web_recon=(
+                use_web_recon
+            ),
         )
 
         self._set_busy(
@@ -536,246 +516,439 @@ class RagChat:
 
         web_report = None
 
+        #
+        # Everything below belongs to ONE
+        # Langfuse consultation trace.
+        #
+
         try:
 
-            #
-            # OPEN WEB RECON
-            #
+            langfuse_session_id = (
+                f"advisor-chat-"
+                f"{self.session_id}"
+            )
 
-            if use_web_recon:
-
-                loading_status.set_text(
-                    (
-                        "Scanning open networks "
-                        "for relevant records..."
-                    )
-                )
-
-                logger.info(
-                    (
-                        "Open web recon enabled | "
-                        "session_id=%s"
+            with (
+                langfuse_service
+                .trace(
+                    name=(
+                        "advisor-consultation"
                     ),
-                    self.session_id,
+                    input_data={
+                        "question": (
+                            question
+                        ),
+                        "provider": (
+                            provider
+                        ),
+                        "model": (
+                            model
+                        ),
+                        "web_recon": (
+                            use_web_recon
+                        ),
+                        "history_messages": (
+                            len(
+                                history_for_rag
+                            )
+                        ),
+                    },
+                    session_id=(
+                        langfuse_session_id
+                    ),
+                    metadata={
+                        "chat_session_id": (
+                            self.session_id
+                        ),
+                        "provider": (
+                            provider
+                        ),
+                        "model": (
+                            model
+                        ),
+                        "web_recon": (
+                            use_web_recon
+                        ),
+                    },
+                    tags=[
+                        "advisor",
+                        "consultation",
+                        (
+                            "web-recon"
+                            if use_web_recon
+                            else
+                            "local-archive"
+                        ),
+                    ],
+                )
+            ) as consultation_trace:
+
+                #
+                # run.io_bound executes work
+                # in another thread.
+                #
+                # Therefore explicitly pass
+                # Langfuse trace context.
+                #
+
+                trace_context = (
+                    consultation_trace
+                    .child_trace_context()
                 )
 
-                try:
+                #
+                # OPEN WEB RECON
+                #
 
-                    web_report = await (
-                        run.io_bound(
-                            auto_research_service
-                            .research,
-                            question,
+                if use_web_recon:
+
+                    loading_status.set_text(
+                        (
+                            "Scanning open networks "
+                            "for relevant records..."
                         )
                     )
 
                     logger.info(
                         (
-                            "Open web recon "
-                            "completed | "
-                            "session_id=%s | "
-                            "hits=%s | "
-                            "indexed=%s | "
-                            "duplicates=%s"
-                        ),
-                        self.session_id,
-                        web_report.hits_found,
-                        web_report.indexed_count,
-                        (
-                            web_report
-                            .duplicate_count
-                        ),
-                    )
-
-                    if (
-                        web_report
-                        .indexed_count
-                        > 0
-                    ):
-
-                        loading_status.set_text(
-                            (
-                                "New record archived. "
-                                "Searching the expanded "
-                                "city archive..."
-                            )
-                        )
-
-                    elif (
-                        web_report
-                        .duplicate_count
-                        > 0
-                    ):
-
-                        loading_status.set_text(
-                            (
-                                "External record already "
-                                "exists in the archive. "
-                                "Consulting stored data..."
-                            )
-                        )
-
-                    else:
-
-                        loading_status.set_text(
-                            (
-                                "No new external record "
-                                "could be archived. "
-                                "Consulting existing "
-                                "city archives..."
-                            )
-                        )
-
-                except Exception:
-
-                    #
-                    # Web recon is optional.
-                    # Failure must not stop local RAG.
-                    #
-
-                    logger.exception(
-                        (
-                            "Open web recon failed | "
+                            "Open web recon enabled | "
                             "session_id=%s"
                         ),
                         self.session_id,
                     )
 
+                    try:
+
+                        web_report = await (
+                            run.io_bound(
+                                auto_research_service
+                                .research,
+                                question,
+                                trace_context=(
+                                    trace_context
+                                ),
+                                session_id=(
+                                    self.session_id
+                                ),
+                            )
+                        )
+
+                        logger.info(
+                            (
+                                "Open web recon "
+                                "completed | "
+                                "session_id=%s | "
+                                "hits=%s | "
+                                "indexed=%s | "
+                                "duplicates=%s"
+                            ),
+                            self.session_id,
+                            (
+                                web_report
+                                .hits_found
+                            ),
+                            (
+                                web_report
+                                .indexed_count
+                            ),
+                            (
+                                web_report
+                                .duplicate_count
+                            ),
+                        )
+
+                        if (
+                            web_report
+                            .indexed_count
+                            > 0
+                        ):
+
+                            loading_status.set_text(
+                                (
+                                    "New record archived. "
+                                    "Searching the expanded "
+                                    "city archive..."
+                                )
+                            )
+
+                        elif (
+                            web_report
+                            .duplicate_count
+                            > 0
+                        ):
+
+                            loading_status.set_text(
+                                (
+                                    "External record "
+                                    "already exists in "
+                                    "the archive. "
+                                    "Consulting stored "
+                                    "data..."
+                                )
+                            )
+
+                        else:
+
+                            loading_status.set_text(
+                                (
+                                    "No new external "
+                                    "record could be "
+                                    "archived. "
+                                    "Consulting existing "
+                                    "city archives..."
+                                )
+                            )
+
+                    except Exception as exc:
+
+                        #
+                        # Web Recon is optional.
+                        # Its failure does not stop RAG.
+                        #
+
+                        logger.exception(
+                            (
+                                "Open web recon "
+                                "failed | "
+                                "session_id=%s"
+                            ),
+                            self.session_id,
+                        )
+
+                        consultation_trace.update(
+                            metadata={
+                                "web_recon_failed": (
+                                    True
+                                ),
+                                "web_recon_error": (
+                                    str(exc)[:1000]
+                                ),
+                            }
+                        )
+
+                        loading_status.set_text(
+                            (
+                                "Open network scan "
+                                "failed. Continuing "
+                                "with existing city "
+                                "archives..."
+                            )
+                        )
+
+                        web_report = None
+
+                else:
+
                     loading_status.set_text(
                         (
-                            "Open network scan failed. "
-                            "Continuing with existing "
+                            "Consulting the "
                             "city archives..."
                         )
                     )
 
-                    web_report = None
+                #
+                # RAG PIPELINE
+                #
 
-            else:
-
-                loading_status.set_text(
+                logger.info(
                     (
-                        "Consulting the "
-                        "city archives..."
+                        "RAG analysis started | "
+                        "session_id=%s"
+                    ),
+                    self.session_id,
+                )
+
+                result: RagAnswer = await (
+                    run.io_bound(
+                        rag_service.ask,
+                        question=(
+                            question
+                        ),
+                        history=(
+                            history_for_rag
+                        ),
+                        llm_provider=(
+                            provider
+                        ),
+                        llm_model=(
+                            model
+                        ),
+                        session_id=(
+                            self.session_id
+                        ),
+                        trace_context=(
+                            trace_context
+                        ),
                     )
                 )
 
-            #
-            # NORMAL RAG
-            #
-            # If Web Recon indexed something,
-            # it is already in Qdrant here.
-            #
+                logger.info(
+                    (
+                        "RAG analysis completed | "
+                        "session_id=%s | "
+                        "provider=%s | "
+                        "model=%s | "
+                        "sources=%s | "
+                        "retrieval=%.3fs | "
+                        "rerank=%.3fs | "
+                        "generation=%.3fs | "
+                        "total=%.3fs"
+                    ),
+                    self.session_id,
+                    result.provider,
+                    result.model,
+                    len(
+                        result.sources
+                    ),
+                    result.retrieval_seconds,
+                    result.rerank_seconds,
+                    result.generation_seconds,
+                    result.total_seconds,
+                )
 
-            logger.info(
-                (
-                    "RAG analysis started | "
-                    "session_id=%s"
-                ),
-                self.session_id,
-            )
+                #
+                # FINAL CONSULTATION TRACE OUTPUT
+                #
 
-            result: RagAnswer = await (
-                run.io_bound(
-                    rag_service.ask,
-                    question=(
-                        question
+                consultation_trace.update(
+                    output={
+                        "answer": (
+                            result.answer
+                        ),
+                        "source_count": (
+                            len(
+                                result.sources
+                            )
+                        ),
+                        "sources": [
+                            {
+                                "citation": (
+                                    source.citation
+                                ),
+                                "source_id": (
+                                    source.source_id
+                                ),
+                                "document_id": (
+                                    source.document_id
+                                ),
+                                "chunk_id": (
+                                    source.chunk_id
+                                ),
+                                "source_name": (
+                                    source.source_name
+                                ),
+                                "document_title": (
+                                    source
+                                    .document_title
+                                ),
+                                "reference": (
+                                    source.reference
+                                ),
+                            }
+                            for source
+                            in result.sources
+                        ],
+                        "web_recon": (
+                            web_report.to_dict()
+                            if web_report
+                            else None
+                        ),
+                    },
+                    metadata={
+                        "provider": (
+                            result.provider
+                        ),
+                        "model": (
+                            result.model
+                        ),
+                        "retrieval_seconds": (
+                            result
+                            .retrieval_seconds
+                        ),
+                        "rerank_seconds": (
+                            result
+                            .rerank_seconds
+                        ),
+                        "generation_seconds": (
+                            result
+                            .generation_seconds
+                        ),
+                        "total_seconds": (
+                            result
+                            .total_seconds
+                        ),
+                        "source_count": (
+                            len(
+                                result.sources
+                            )
+                        ),
+                        "web_recon_enabled": (
+                            use_web_recon
+                        ),
+                        "web_sources_indexed": (
+                            (
+                                web_report
+                                .indexed_count
+                            )
+                            if web_report
+                            else 0
+                        ),
+                    },
+                )
+
+                #
+                # SAVE ASSISTANT RESPONSE
+                #
+
+                metadata = (
+                    self._build_result_metadata(
+                        result=result,
+                        web_report=(
+                            web_report
+                        ),
+                    )
+                )
+
+                saved_assistant = await (
+                    run.io_bound(
+                        chat_repository
+                        .add_message,
+                        session_id=(
+                            self.session_id
+                        ),
+                        role="assistant",
+                        content=(
+                            result.answer
+                        ),
+                        metadata=(
+                            metadata
+                        ),
+                    )
+                )
+
+                logger.info(
+                    (
+                        "Advisor answer "
+                        "persisted | "
+                        "session_id=%s | "
+                        "message_id=%s | "
+                        "citations=%s"
                     ),
-                    history=(
-                        history_for_rag
-                    ),
-                    llm_provider=(
-                        provider
-                    ),
-                    llm_model=(
-                        model
-                    ),
-                    session_id=(
-                        self.session_id
+                    self.session_id,
+                    saved_assistant.id,
+                    len(
+                        result.sources
                     ),
                 )
-            )
 
-            logger.info(
-                (
-                    "RAG analysis completed | "
-                    "session_id=%s | "
-                    "provider=%s | "
-                    "model=%s | "
-                    "sources=%s | "
-                    "retrieval=%.3fs | "
-                    "rerank=%.3fs | "
-                    "generation=%.3fs | "
-                    "total=%.3fs"
-                ),
-                self.session_id,
-                result.provider,
-                result.model,
-                len(
-                    result.sources
-                ),
-                result.retrieval_seconds,
-                result.rerank_seconds,
-                result.generation_seconds,
-                result.total_seconds,
-            )
+                loading_row.delete()
 
-            metadata = (
-                self._build_result_metadata(
-                    result=(
-                        result
-                    ),
+                self._append_advisor_message(
+                    result=result,
                     web_report=(
                         web_report
                     ),
                 )
-            )
-
-            #
-            # Persist assistant answer.
-            #
-
-            saved_assistant = await (
-                run.io_bound(
-                    chat_repository
-                    .add_message,
-                    session_id=(
-                        self.session_id
-                    ),
-                    role="assistant",
-                    content=(
-                        result.answer
-                    ),
-                    metadata=(
-                        metadata
-                    ),
-                )
-            )
-
-            logger.info(
-                (
-                    "Advisor answer persisted | "
-                    "session_id=%s | "
-                    "message_id=%s | "
-                    "citations=%s"
-                ),
-                self.session_id,
-                saved_assistant.id,
-                len(
-                    result.sources
-                ),
-            )
-
-            loading_row.delete()
-
-            self._append_advisor_message(
-                result=(
-                    result
-                ),
-                web_report=(
-                    web_report
-                ),
-            )
 
         except Exception as exc:
 
@@ -793,11 +966,9 @@ class RagChat:
             )
 
             try:
-
                 loading_row.delete()
 
             except Exception:
-
                 pass
 
             self._append_error_message(
@@ -824,7 +995,6 @@ class RagChat:
     ) -> None:
 
         if self.is_busy:
-
             return
 
         logger.info(
@@ -848,7 +1018,6 @@ class RagChat:
             self.messages_container
             is not None
         ):
-
             self.messages_container.clear()
 
         self.empty_state = None
@@ -859,21 +1028,17 @@ class RagChat:
             self.question_input
             is not None
         ):
-
             self.question_input.set_value(
                 ""
             )
 
         ui.notify(
-            (
-                "New consultation "
-                "ready."
-            ),
+            "New consultation ready.",
             color="info",
         )
 
     #
-    # RESTORE SAVED CONSULTATION
+    # RESTORE CHAT
     #
 
     def _restore_latest_session(
@@ -1001,7 +1166,6 @@ class RagChat:
                 message.role
                 != "assistant"
             ):
-
                 continue
 
             metadata = (
@@ -1038,18 +1202,22 @@ class RagChat:
                 )
             ):
 
-                with ui.card().classes(
-                    (
-                        "q-pa-md "
-                        "shadow-none"
+                with (
+                    ui.card()
+                    .classes(
+                        (
+                            "q-pa-md "
+                            "shadow-none"
+                        )
                     )
-                ).style(
-                    (
-                        "max-width: 78%; "
-                        "background: "
-                        "#29434f !important; "
-                        "border: "
-                        "1px solid #567887;"
+                    .style(
+                        (
+                            "max-width: 78%; "
+                            "background: "
+                            "#29434f !important; "
+                            "border: "
+                            "1px solid #567887;"
+                        )
                     )
                 ):
 
@@ -1091,16 +1259,20 @@ class RagChat:
                 )
             ) as row:
 
-                with ui.card().classes(
-                    (
-                        "q-pa-md "
-                        "shadow-none"
+                with (
+                    ui.card()
+                    .classes(
+                        (
+                            "q-pa-md "
+                            "shadow-none"
+                        )
                     )
-                ).style(
-                    (
-                        "max-width: 78%; "
-                        "border: "
-                        "1px solid #344750;"
+                    .style(
+                        (
+                            "max-width: 78%; "
+                            "border: "
+                            "1px solid #344750;"
+                        )
                     )
                 ):
 
@@ -1191,17 +1363,14 @@ class RagChat:
                 result
                 .retrieval_seconds
             ),
-
             "rerank": (
                 result
                 .rerank_seconds
             ),
-
             "generation": (
                 result
                 .generation_seconds
             ),
-
             "total": (
                 result
                 .total_seconds
@@ -1239,7 +1408,6 @@ class RagChat:
 
         self._render_advisor_message(
             text=text,
-
             provider=str(
                 metadata.get(
                     "provider",
@@ -1247,7 +1415,6 @@ class RagChat:
                 )
                 or ""
             ),
-
             model=str(
                 metadata.get(
                     "model",
@@ -1255,21 +1422,18 @@ class RagChat:
                 )
                 or ""
             ),
-
             citations=(
                 metadata.get(
                     "citations"
                 )
                 or []
             ),
-
             timing=(
                 metadata.get(
                     "timing"
                 )
                 or {}
             ),
-
             web_recon=(
                 metadata.get(
                     "web_recon"
@@ -1299,16 +1463,20 @@ class RagChat:
                 )
             ):
 
-                with ui.card().classes(
-                    (
-                        "q-pa-md "
-                        "shadow-none"
+                with (
+                    ui.card()
+                    .classes(
+                        (
+                            "q-pa-md "
+                            "shadow-none"
+                        )
                     )
-                ).style(
-                    (
-                        "max-width: 84%; "
-                        "border: "
-                        "1px solid #344750;"
+                    .style(
+                        (
+                            "max-width: 84%; "
+                            "border: "
+                            "1px solid #344750;"
+                        )
                     )
                 ):
 
@@ -1357,7 +1525,7 @@ class RagChat:
                             )
 
                     #
-                    # WEB RECON SUMMARY
+                    # WEB RECON
                     #
 
                     if web_recon:
@@ -1387,9 +1555,7 @@ class RagChat:
                                 "Archive references "
                                 f"({len(citations)})"
                             ),
-                            icon=(
-                                "inventory_2"
-                            ),
+                            icon="inventory_2",
                         ).classes(
                             (
                                 "w-full "
@@ -1397,9 +1563,7 @@ class RagChat:
                             )
                         ):
 
-                            for source in (
-                                citations
-                            ):
+                            for source in citations:
 
                                 self._render_source(
                                     source
@@ -1559,24 +1723,18 @@ class RagChat:
                             == "indexed"
                         ):
 
-                            color = (
-                                "positive"
-                            )
+                            color = "positive"
 
                         elif status in {
                             "duplicate",
                             "skipped",
                         }:
 
-                            color = (
-                                "warning"
-                            )
+                            color = "warning"
 
                         else:
 
-                            color = (
-                                "negative"
-                            )
+                            color = "negative"
 
                         ui.badge(
                             status.upper(),
@@ -1647,9 +1805,7 @@ class RagChat:
                     if error:
 
                         error_class = (
-                            (
-                                "text-warning"
-                            )
+                            "text-warning"
                             if status
                             in {
                                 "duplicate",
@@ -1785,12 +1941,10 @@ class RagChat:
                     reference
                 )
 
-                if (
-                    reference.startswith(
-                        (
-                            "http://",
-                            "https://",
-                        )
+                if reference.startswith(
+                    (
+                        "http://",
+                        "https://",
                     )
                 ):
 
@@ -1837,7 +1991,6 @@ class RagChat:
                     TypeError,
                     ValueError,
                 ):
-
                     pass
 
             if (
@@ -1858,7 +2011,6 @@ class RagChat:
                     TypeError,
                     ValueError,
                 ):
-
                     pass
 
             if scores:
@@ -1910,19 +2062,14 @@ class RagChat:
         #
 
         if (
-            "429"
-            in raw_error
-            or
-            "rate limit"
+            "429" in raw_error
+            or "rate limit"
             in lowered
-            or
-            "too_many_requests"
+            or "too_many_requests"
             in lowered
-            or
-            "quota exhausted"
+            or "quota exhausted"
             in lowered
-            or
-            "quota exceeded"
+            or "quota exceeded"
             in lowered
         ):
 
@@ -1942,13 +2089,10 @@ class RagChat:
         #
 
         elif (
-            "403"
-            in raw_error
-            or
-            "access denied"
+            "403" in raw_error
+            or "access denied"
             in lowered
-            or
-            "forbidden"
+            or "forbidden"
             in lowered
         ):
 
@@ -1969,19 +2113,14 @@ class RagChat:
         #
 
         elif (
-            "503"
-            in raw_error
-            or
-            "service_unavailable"
+            "503" in raw_error
+            or "service_unavailable"
             in lowered
-            or
-            "service unavailable"
+            or "service unavailable"
             in lowered
-            or
-            "high demand"
+            or "high demand"
             in lowered
-            or
-            "temporarily unavailable"
+            or "temporarily unavailable"
             in lowered
         ):
 
@@ -2002,18 +2141,15 @@ class RagChat:
         #
 
         elif (
-            "timeout"
-            in lowered
-            or
-            "timed out"
+            "timeout" in lowered
+            or "timed out"
             in lowered
         ):
 
             if (
                 "gemini api"
                 in lowered
-                or
-                "groq api"
+                or "groq api"
                 in lowered
             ):
 
@@ -2060,16 +2196,20 @@ class RagChat:
                 )
             ):
 
-                with ui.card().classes(
-                    (
-                        "q-pa-md "
-                        "shadow-none"
+                with (
+                    ui.card()
+                    .classes(
+                        (
+                            "q-pa-md "
+                            "shadow-none"
+                        )
                     )
-                ).style(
-                    (
-                        "max-width: 84%; "
-                        "border: "
-                        "1px solid #a85b52;"
+                    .style(
+                        (
+                            "max-width: 84%; "
+                            "border: "
+                            "1px solid #a85b52;"
+                        )
                     )
                 ):
 
@@ -2083,18 +2223,14 @@ class RagChat:
                     )
 
                     #
-                    # Even if final RAG failed,
-                    # show successfully performed
-                    # Web Recon to the user.
+                    # Web Recon may have succeeded
+                    # even if final RAG failed.
                     #
 
                     if web_report:
 
                         self._render_web_recon(
-                            (
-                                web_report
-                                .to_dict()
-                            )
+                            web_report.to_dict()
                         )
 
                     ui.label(
@@ -2130,7 +2266,6 @@ class RagChat:
             self.messages_container
             is None
         ):
-
             return
 
         with self.messages_container:
@@ -2190,7 +2325,6 @@ class RagChat:
             self.empty_state
             is None
         ):
-
             return
 
         self.empty_state.delete()
@@ -2205,7 +2339,6 @@ class RagChat:
             self.session_label
             is None
         ):
-
             return
 
         self.session_label.set_text(
@@ -2226,7 +2359,7 @@ class RagChat:
     ) -> dict:
 
         return {
-            "version": 2,
+            "version": 3,
 
             "provider": (
                 result.provider
@@ -2253,17 +2386,14 @@ class RagChat:
                     result
                     .retrieval_seconds
                 ),
-
                 "rerank": (
                     result
                     .rerank_seconds
                 ),
-
                 "generation": (
                     result
                     .generation_seconds
                 ),
-
                 "total": (
                     result
                     .total_seconds
@@ -2280,9 +2410,7 @@ class RagChat:
 
         serialized = []
 
-        for source in (
-            result.sources
-        ):
+        for source in result.sources:
 
             serialized.append(
                 {
@@ -2295,8 +2423,7 @@ class RagChat:
                     ),
 
                     "document_id": (
-                        source
-                        .document_id
+                        source.document_id
                     ),
 
                     "chunk_id": (
@@ -2304,13 +2431,11 @@ class RagChat:
                     ),
 
                     "source_name": (
-                        source
-                        .source_name
+                        source.source_name
                     ),
 
                     "source_type": (
-                        source
-                        .source_type
+                        source.source_type
                     ),
 
                     "document_title": (
@@ -2319,8 +2444,7 @@ class RagChat:
                     ),
 
                     "chunk_index": (
-                        source
-                        .chunk_index
+                        source.chunk_index
                     ),
 
                     "reference": (
@@ -2328,13 +2452,11 @@ class RagChat:
                     ),
 
                     "vector_score": (
-                        source
-                        .vector_score
+                        source.vector_score
                     ),
 
                     "rerank_score": (
-                        source
-                        .rerank_score
+                        source.rerank_score
                     ),
                 }
             )
@@ -2355,21 +2477,18 @@ class RagChat:
                     "retrieval"
                 ),
             ),
-
             (
                 "Analysis",
                 timing.get(
                     "rerank"
                 ),
             ),
-
             (
                 "Core",
                 timing.get(
                     "generation"
                 ),
             ),
-
             (
                 "Total",
                 timing.get(
@@ -2387,7 +2506,6 @@ class RagChat:
                 value
                 is None
             ):
-
                 continue
 
             try:
@@ -2403,7 +2521,6 @@ class RagChat:
                 TypeError,
                 ValueError,
             ):
-
                 continue
 
         return (
@@ -2421,9 +2538,7 @@ class RagChat:
         busy: bool,
     ) -> None:
 
-        self.is_busy = (
-            busy
-        )
+        self.is_busy = busy
 
         controls = [
             self.question_input,
@@ -2450,13 +2565,10 @@ class RagChat:
                 control
                 is None
             ):
-
                 continue
 
             if busy:
-
                 control.disable()
 
             else:
-
                 control.enable()

@@ -62,12 +62,19 @@ class RagChat:
 
         self.is_busy = False
 
+    #
+    # UI
+    #
+
     def render(
         self,
     ) -> None:
 
         logger.info(
-            "Initializing Advisor chat."
+            (
+                "Initializing "
+                "Advisor chat UI."
+            )
         )
 
         with ui.column().classes(
@@ -91,9 +98,11 @@ class RagChat:
                 #
 
                 with ui.row().classes(
-                    "w-full "
-                    "items-center "
-                    "q-mt-sm"
+                    (
+                        "w-full "
+                        "items-center "
+                        "q-mt-sm"
+                    )
                 ):
 
                     self.web_recon_checkbox = (
@@ -108,10 +117,12 @@ class RagChat:
 
                     self.web_recon_checkbox.tooltip(
                         (
-                            "Search the open web before "
-                            "answering, archive one useful "
-                            "source and make it available "
-                            "to future consultations."
+                            "Search the open web "
+                            "before answering. "
+                            "The Advisor will try "
+                            "to archive one useful "
+                            "source so it can be "
+                            "used again later."
                         )
                     )
 
@@ -126,8 +137,13 @@ class RagChat:
 
                     self.new_chat_button = (
                         ui.button(
-                            "New consultation",
-                            icon="add_comment",
+                            (
+                                "New "
+                                "consultation"
+                            ),
+                            icon=(
+                                "add_comment"
+                            ),
                             on_click=(
                                 self.new_chat
                             ),
@@ -142,8 +158,10 @@ class RagChat:
                         self.session_title
                     )
                     .classes(
-                        "text-xs "
-                        "advisor-muted"
+                        (
+                            "text-xs "
+                            "advisor-muted"
+                        )
                     )
                 )
 
@@ -156,14 +174,18 @@ class RagChat:
             self.messages_container = (
                 ui.column()
                 .classes(
-                    "col "
-                    "w-full "
-                    "q-pa-lg "
-                    "gap-4"
+                    (
+                        "col "
+                        "w-full "
+                        "q-pa-lg "
+                        "gap-4"
+                    )
                 )
                 .style(
-                    "overflow-y: auto; "
-                    "min-height: 0;"
+                    (
+                        "overflow-y: auto; "
+                        "min-height: 0;"
+                    )
                 )
             )
 
@@ -172,10 +194,12 @@ class RagChat:
             #
 
             with ui.row().classes(
-                "w-full "
-                "q-pa-md "
-                "items-center "
-                "gap-2"
+                (
+                    "w-full "
+                    "q-pa-md "
+                    "items-center "
+                    "gap-2"
+                )
             ).style(
                 (
                     "background: "
@@ -188,7 +212,8 @@ class RagChat:
                 self.question_input = (
                     ui.input(
                         placeholder=(
-                            "Consult the Advisor..."
+                            "Consult the "
+                            "Advisor..."
                         ),
                     )
                     .props(
@@ -225,11 +250,25 @@ class RagChat:
 
         await self.send_message()
 
+    #
+    # SEND
+    #
+
     async def send_message(
         self,
     ) -> None:
 
         if self.is_busy:
+
+            logger.warning(
+                (
+                    "Message ignored because "
+                    "Advisor is busy | "
+                    "session_id=%s"
+                ),
+                self.session_id,
+            )
+
             return
 
         question = (
@@ -238,6 +277,7 @@ class RagChat:
         ).strip()
 
         if not question:
+
             return
 
         provider = (
@@ -260,7 +300,10 @@ class RagChat:
         ):
 
             ui.notify(
-                "Select an Advisor core first.",
+                (
+                    "Select an Advisor "
+                    "core first."
+                ),
                 color="warning",
             )
 
@@ -268,22 +311,24 @@ class RagChat:
 
         logger.info(
             (
-                "Advisor consultation started | "
+                "Advisor consultation "
+                "started | "
                 "session_id=%s | "
                 "provider=%s | "
                 "model=%s | "
                 "web_recon=%s | "
-                "question=%s"
+                "question_chars=%s"
             ),
             self.session_id,
             provider,
             model,
             use_web_recon,
-            question,
+            len(question),
         )
 
         #
-        # LOAD EXISTING HISTORY
+        # Load previous conversation
+        # before storing current question.
         #
 
         if (
@@ -305,6 +350,19 @@ class RagChat:
                             .HISTORY_LIMIT
                         ),
                     )
+                )
+
+                logger.info(
+                    (
+                        "Consultation history "
+                        "loaded | "
+                        "session_id=%s | "
+                        "messages=%s"
+                    ),
+                    self.session_id,
+                    len(
+                        history_for_rag
+                    ),
                 )
 
             except Exception:
@@ -333,7 +391,8 @@ class RagChat:
             history_for_rag = []
 
         #
-        # CREATE CHAT SESSION
+        # Create consultation only when
+        # first real message is sent.
         #
 
         if (
@@ -369,6 +428,16 @@ class RagChat:
 
                 self._update_session_label()
 
+                logger.info(
+                    (
+                        "Consultation created | "
+                        "session_id=%s | "
+                        "title=%s"
+                    ),
+                    self.session_id,
+                    self.session_title,
+                )
+
             except Exception:
 
                 logger.exception(
@@ -389,19 +458,32 @@ class RagChat:
                 return
 
         #
-        # SAVE USER MESSAGE
+        # Store user message BEFORE any
+        # network / RAG operations.
         #
 
         try:
 
-            await run.io_bound(
-                chat_repository
-                .add_message,
-                session_id=(
-                    self.session_id
+            saved_message = await (
+                run.io_bound(
+                    chat_repository
+                    .add_message,
+                    session_id=(
+                        self.session_id
+                    ),
+                    role="user",
+                    content=question,
+                )
+            )
+
+            logger.info(
+                (
+                    "User message persisted | "
+                    "session_id=%s | "
+                    "message_id=%s"
                 ),
-                role="user",
-                content=question,
+                self.session_id,
+                saved_message.id,
             )
 
         except Exception:
@@ -435,7 +517,10 @@ class RagChat:
             ""
         )
 
-        loading_row = (
+        (
+            loading_row,
+            loading_status,
+        ) = (
             self._append_loading_message(
                 provider=provider,
                 model=model,
@@ -454,15 +539,17 @@ class RagChat:
         try:
 
             #
-            # OPTIONAL INTERNET RECON
-            #
-            # This happens BEFORE RAG retrieval,
-            # therefore a newly indexed source
-            # can immediately be retrieved for
-            # this same question.
+            # OPEN WEB RECON
             #
 
             if use_web_recon:
+
+                loading_status.set_text(
+                    (
+                        "Scanning open networks "
+                        "for relevant records..."
+                    )
+                )
 
                 logger.info(
                     (
@@ -484,21 +571,66 @@ class RagChat:
 
                     logger.info(
                         (
-                            "Open web recon finished | "
+                            "Open web recon "
+                            "completed | "
                             "session_id=%s | "
                             "hits=%s | "
-                            "indexed=%s"
+                            "indexed=%s | "
+                            "duplicates=%s"
                         ),
                         self.session_id,
                         web_report.hits_found,
                         web_report.indexed_count,
+                        (
+                            web_report
+                            .duplicate_count
+                        ),
                     )
+
+                    if (
+                        web_report
+                        .indexed_count
+                        > 0
+                    ):
+
+                        loading_status.set_text(
+                            (
+                                "New record archived. "
+                                "Searching the expanded "
+                                "city archive..."
+                            )
+                        )
+
+                    elif (
+                        web_report
+                        .duplicate_count
+                        > 0
+                    ):
+
+                        loading_status.set_text(
+                            (
+                                "External record already "
+                                "exists in the archive. "
+                                "Consulting stored data..."
+                            )
+                        )
+
+                    else:
+
+                        loading_status.set_text(
+                            (
+                                "No new external record "
+                                "could be archived. "
+                                "Consulting existing "
+                                "city archives..."
+                            )
+                        )
 
                 except Exception:
 
                     #
-                    # Web search failure must NOT
-                    # break local RAG.
+                    # Web recon is optional.
+                    # Failure must not stop local RAG.
                     #
 
                     logger.exception(
@@ -509,19 +641,46 @@ class RagChat:
                         self.session_id,
                     )
 
+                    loading_status.set_text(
+                        (
+                            "Open network scan failed. "
+                            "Continuing with existing "
+                            "city archives..."
+                        )
+                    )
+
                     web_report = None
+
+            else:
+
+                loading_status.set_text(
+                    (
+                        "Consulting the "
+                        "city archives..."
+                    )
+                )
 
             #
             # NORMAL RAG
             #
-            # If web recon indexed a new source,
+            # If Web Recon indexed something,
             # it is already in Qdrant here.
             #
+
+            logger.info(
+                (
+                    "RAG analysis started | "
+                    "session_id=%s"
+                ),
+                self.session_id,
+            )
 
             result: RagAnswer = await (
                 run.io_bound(
                     rag_service.ask,
-                    question=question,
+                    question=(
+                        question
+                    ),
                     history=(
                         history_for_rag
                     ),
@@ -534,9 +693,35 @@ class RagChat:
                 )
             )
 
+            logger.info(
+                (
+                    "RAG analysis completed | "
+                    "session_id=%s | "
+                    "provider=%s | "
+                    "model=%s | "
+                    "sources=%s | "
+                    "retrieval=%.3fs | "
+                    "rerank=%.3fs | "
+                    "generation=%.3fs | "
+                    "total=%.3fs"
+                ),
+                self.session_id,
+                result.provider,
+                result.model,
+                len(
+                    result.sources
+                ),
+                result.retrieval_seconds,
+                result.rerank_seconds,
+                result.generation_seconds,
+                result.total_seconds,
+            )
+
             metadata = (
                 self._build_result_metadata(
-                    result=result,
+                    result=(
+                        result
+                    ),
                     web_report=(
                         web_report
                     ),
@@ -544,46 +729,49 @@ class RagChat:
             )
 
             #
-            # SAVE ADVISOR ANSWER
+            # Persist assistant answer.
             #
 
-            await run.io_bound(
-                chat_repository
-                .add_message,
-                session_id=(
-                    self.session_id
+            saved_assistant = await (
+                run.io_bound(
+                    chat_repository
+                    .add_message,
+                    session_id=(
+                        self.session_id
+                    ),
+                    role="assistant",
+                    content=(
+                        result.answer
+                    ),
+                    metadata=(
+                        metadata
+                    ),
+                )
+            )
+
+            logger.info(
+                (
+                    "Advisor answer persisted | "
+                    "session_id=%s | "
+                    "message_id=%s | "
+                    "citations=%s"
                 ),
-                role="assistant",
-                content=(
-                    result.answer
-                ),
-                metadata=(
-                    metadata
+                self.session_id,
+                saved_assistant.id,
+                len(
+                    result.sources
                 ),
             )
 
             loading_row.delete()
 
             self._append_advisor_message(
-                result=result,
+                result=(
+                    result
+                ),
                 web_report=(
                     web_report
                 ),
-            )
-
-            logger.info(
-                (
-                    "Advisor consultation "
-                    "completed | "
-                    "session_id=%s | "
-                    "sources=%s | "
-                    "total=%.3fs"
-                ),
-                self.session_id,
-                len(
-                    result.sources
-                ),
-                result.total_seconds,
             )
 
         except Exception as exc:
@@ -601,7 +789,13 @@ class RagChat:
                 model,
             )
 
-            loading_row.delete()
+            try:
+
+                loading_row.delete()
+
+            except Exception:
+
+                pass
 
             self._append_error_message(
                 provider=provider,
@@ -618,16 +812,22 @@ class RagChat:
                 False
             )
 
+    #
+    # NEW CHAT
+    #
+
     def new_chat(
         self,
     ) -> None:
 
         if self.is_busy:
+
             return
 
         logger.info(
             (
-                "New consultation requested | "
+                "New consultation "
+                "requested | "
                 "previous_session_id=%s"
             ),
             self.session_id,
@@ -662,12 +862,15 @@ class RagChat:
             )
 
         ui.notify(
-            "New consultation ready.",
+            (
+                "New consultation "
+                "ready."
+            ),
             color="info",
         )
 
     #
-    # RESTORE PERSISTED CHAT
+    # RESTORE SAVED CONSULTATION
     #
 
     def _restore_latest_session(
@@ -699,12 +902,27 @@ class RagChat:
 
             self._show_empty_state()
 
+            ui.notify(
+                (
+                    "Could not restore "
+                    "consultation history."
+                ),
+                color="warning",
+            )
+
             return
 
         if (
             chat_session
             is None
         ):
+
+            logger.info(
+                (
+                    "No previous "
+                    "consultation found."
+                )
+            )
 
             self._show_empty_state()
 
@@ -753,6 +971,16 @@ class RagChat:
 
             return
 
+        logger.info(
+            (
+                "Restoring consultation | "
+                "session_id=%s | "
+                "messages=%s"
+            ),
+            self.session_id,
+            len(messages),
+        )
+
         for message in messages:
 
             if (
@@ -770,6 +998,7 @@ class RagChat:
                 message.role
                 != "assistant"
             ):
+
                 continue
 
             metadata = (
@@ -800,13 +1029,17 @@ class RagChat:
         with self.messages_container:
 
             with ui.row().classes(
-                "w-full "
-                "justify-end"
+                (
+                    "w-full "
+                    "justify-end"
+                )
             ):
 
                 with ui.card().classes(
-                    "q-pa-md "
-                    "shadow-none"
+                    (
+                        "q-pa-md "
+                        "shadow-none"
+                    )
                 ).style(
                     (
                         "max-width: 78%; "
@@ -820,19 +1053,23 @@ class RagChat:
                     ui.label(
                         "YOU"
                     ).classes(
-                        "text-xs "
-                        "advisor-subtitle"
+                        (
+                            "text-xs "
+                            "advisor-subtitle"
+                        )
                     )
 
                     ui.label(
                         text
                     ).classes(
-                        "text-body1 "
-                        "whitespace-pre-wrap"
+                        (
+                            "text-body1 "
+                            "whitespace-pre-wrap"
+                        )
                     )
 
     #
-    # LOADING
+    # LOADING MESSAGE
     #
 
     def _append_loading_message(
@@ -845,12 +1082,17 @@ class RagChat:
         with self.messages_container:
 
             with ui.row().classes(
-                "w-full justify-start"
+                (
+                    "w-full "
+                    "justify-start"
+                )
             ) as row:
 
                 with ui.card().classes(
-                    "q-pa-md "
-                    "shadow-none"
+                    (
+                        "q-pa-md "
+                        "shadow-none"
+                    )
                 ).style(
                     (
                         "max-width: 78%; "
@@ -860,7 +1102,10 @@ class RagChat:
                 ):
 
                     with ui.row().classes(
-                        "items-center gap-3"
+                        (
+                            "items-center "
+                            "gap-3"
+                        )
                     ):
 
                         ui.spinner(
@@ -874,34 +1119,33 @@ class RagChat:
                             ui.label(
                                 "THE ADVISOR"
                             ).classes(
-                                "text-xs "
-                                "advisor-subtitle"
+                                (
+                                    "text-xs "
+                                    "advisor-subtitle"
+                                )
                             )
 
-                            if web_recon:
-
+                            status_label = (
                                 ui.label(
                                     (
-                                        "Scanning open networks, "
-                                        "acquiring records and "
-                                        "consulting city archives..."
+                                        "Scanning open "
+                                        "networks..."
+                                        if web_recon
+                                        else
+                                        (
+                                            "Consulting "
+                                            "the city "
+                                            "archives..."
+                                        )
                                     )
-                                ).classes(
-                                    "text-sm "
-                                    "advisor-muted"
                                 )
-
-                            else:
-
-                                ui.label(
+                                .classes(
                                     (
-                                        "Consulting the "
-                                        "city archives..."
+                                        "text-sm "
+                                        "advisor-muted"
                                     )
-                                ).classes(
-                                    "text-sm "
-                                    "advisor-muted"
                                 )
+                            )
 
                             ui.label(
                                 (
@@ -909,14 +1153,19 @@ class RagChat:
                                     f"{model}"
                                 )
                             ).classes(
-                                "text-xs "
-                                "advisor-muted"
+                                (
+                                    "text-xs "
+                                    "advisor-muted"
+                                )
                             )
 
-        return row
+        return (
+            row,
+            status_label,
+        )
 
     #
-    # ADVISOR RESPONSE
+    # ADVISOR MESSAGE
     #
 
     def _append_advisor_message(
@@ -939,14 +1188,17 @@ class RagChat:
                 result
                 .retrieval_seconds
             ),
+
             "rerank": (
                 result
                 .rerank_seconds
             ),
+
             "generation": (
                 result
                 .generation_seconds
             ),
+
             "total": (
                 result
                 .total_seconds
@@ -984,6 +1236,7 @@ class RagChat:
 
         self._render_advisor_message(
             text=text,
+
             provider=str(
                 metadata.get(
                     "provider",
@@ -991,6 +1244,7 @@ class RagChat:
                 )
                 or ""
             ),
+
             model=str(
                 metadata.get(
                     "model",
@@ -998,18 +1252,21 @@ class RagChat:
                 )
                 or ""
             ),
+
             citations=(
                 metadata.get(
                     "citations"
                 )
                 or []
             ),
+
             timing=(
                 metadata.get(
                     "timing"
                 )
                 or {}
             ),
+
             web_recon=(
                 metadata.get(
                     "web_recon"
@@ -1033,12 +1290,17 @@ class RagChat:
         with self.messages_container:
 
             with ui.row().classes(
-                "w-full justify-start"
+                (
+                    "w-full "
+                    "justify-start"
+                )
             ):
 
                 with ui.card().classes(
-                    "q-pa-md "
-                    "shadow-none"
+                    (
+                        "q-pa-md "
+                        "shadow-none"
+                    )
                 ).style(
                     (
                         "max-width: 84%; "
@@ -1048,14 +1310,19 @@ class RagChat:
                 ):
 
                     with ui.row().classes(
-                        "w-full items-center"
+                        (
+                            "w-full "
+                            "items-center"
+                        )
                     ):
 
                         ui.label(
                             "THE ADVISOR"
                         ).classes(
-                            "text-xs "
-                            "advisor-subtitle"
+                            (
+                                "text-xs "
+                                "advisor-subtitle"
+                            )
                         )
 
                         ui.space()
@@ -1065,7 +1332,7 @@ class RagChat:
                             or model
                         ):
 
-                            ui.label(
+                            core_text = (
                                 " / ".join(
                                     value
                                     for value
@@ -1075,13 +1342,19 @@ class RagChat:
                                     ]
                                     if value
                                 )
+                            )
+
+                            ui.label(
+                                core_text
                             ).classes(
-                                "text-xs "
-                                "advisor-muted"
+                                (
+                                    "text-xs "
+                                    "advisor-muted"
+                                )
                             )
 
                     #
-                    # INTERNET RECON RESULT
+                    # WEB RECON SUMMARY
                     #
 
                     if web_recon:
@@ -1101,7 +1374,7 @@ class RagChat:
                     )
 
                     #
-                    # RAG SOURCES
+                    # SOURCES
                     #
 
                     if citations:
@@ -1111,12 +1384,19 @@ class RagChat:
                                 "Archive references "
                                 f"({len(citations)})"
                             ),
-                            icon="inventory_2",
+                            icon=(
+                                "inventory_2"
+                            ),
                         ).classes(
-                            "w-full q-mt-sm"
+                            (
+                                "w-full "
+                                "q-mt-sm"
+                            )
                         ):
 
-                            for source in citations:
+                            for source in (
+                                citations
+                            ):
 
                                 self._render_source(
                                     source
@@ -1139,13 +1419,15 @@ class RagChat:
                             ui.label(
                                 timing_text
                             ).classes(
-                                "text-xs "
-                                "advisor-muted "
-                                "q-mt-sm"
+                                (
+                                    "text-xs "
+                                    "advisor-muted "
+                                    "q-mt-sm"
+                                )
                             )
 
     #
-    # INTERNET RECON DISPLAY
+    # WEB RECON RESULT
     #
 
     def _render_web_recon(
@@ -1169,6 +1451,14 @@ class RagChat:
             or 0
         )
 
+        duplicate_count = int(
+            report.get(
+                "duplicate_count",
+                0,
+            )
+            or 0
+        )
+
         sources = (
             report.get(
                 "sources"
@@ -1176,16 +1466,31 @@ class RagChat:
             or []
         )
 
+        title = (
+            "OPEN WEB RECON "
+            f"· {hits_found} discovered "
+            f"· {indexed_count} archived"
+        )
+
+        if (
+            duplicate_count
+            > 0
+        ):
+
+            title += (
+                " · "
+                f"{duplicate_count} existing"
+            )
+
         with ui.expansion(
-            (
-                "OPEN WEB RECON "
-                f"· {hits_found} discovered "
-                f"· {indexed_count} archived"
-            ),
+            title,
             icon="travel_explore",
             value=False,
         ).classes(
-            "w-full q-mb-sm"
+            (
+                "w-full "
+                "q-mb-sm"
+            )
         ):
 
             query = (
@@ -1197,10 +1502,15 @@ class RagChat:
             if query:
 
                 ui.label(
-                    f"Search: {query}"
+                    (
+                        f"Search: "
+                        f"{query}"
+                    )
                 ).classes(
-                    "text-xs "
-                    "advisor-muted"
+                    (
+                        "text-xs "
+                        "advisor-muted"
+                    )
                 )
 
             if not sources:
@@ -1211,8 +1521,10 @@ class RagChat:
                         "were archived."
                     )
                 ).classes(
-                    "text-xs "
-                    "advisor-muted"
+                    (
+                        "text-xs "
+                        "advisor-muted"
+                    )
                 )
 
             for source in sources:
@@ -1225,30 +1537,43 @@ class RagChat:
                 )
 
                 with ui.column().classes(
-                    "w-full gap-1 q-mt-sm"
+                    (
+                        "w-full "
+                        "gap-1 "
+                        "q-mt-sm"
+                    )
                 ):
 
                     with ui.row().classes(
-                        "items-center gap-2"
+                        (
+                            "items-center "
+                            "gap-2"
+                        )
                     ):
 
-                        color = (
-                            "positive"
-                            if (
-                                status
-                                == "indexed"
+                        if (
+                            status
+                            == "indexed"
+                        ):
+
+                            color = (
+                                "positive"
                             )
-                            else
-                            (
+
+                        elif status in {
+                            "duplicate",
+                            "skipped",
+                        }:
+
+                            color = (
                                 "warning"
-                                if (
-                                    status
-                                    == "duplicate"
-                                )
-                                else
+                            )
+
+                        else:
+
+                            color = (
                                 "negative"
                             )
-                        )
 
                         ui.badge(
                             status.upper(),
@@ -1264,8 +1589,10 @@ class RagChat:
                                 "Internet source"
                             )
                         ).classes(
-                            "text-sm "
-                            "font-medium"
+                            (
+                                "text-sm "
+                                "font-medium"
+                            )
                         )
 
                     url = (
@@ -1281,8 +1608,31 @@ class RagChat:
                             url,
                             new_tab=True,
                         ).classes(
-                            "text-xs "
-                            "text-primary"
+                            (
+                                "text-xs "
+                                "text-primary "
+                                "source-uri"
+                            )
+                        )
+
+                    source_id = (
+                        source.get(
+                            "source_id"
+                        )
+                    )
+
+                    if source_id:
+
+                        ui.label(
+                            (
+                                "Archive source ID: "
+                                f"{source_id}"
+                            )
+                        ).classes(
+                            (
+                                "text-xs "
+                                "advisor-muted"
+                            )
                         )
 
                     error = (
@@ -1293,15 +1643,30 @@ class RagChat:
 
                     if error:
 
-                        ui.label(
-                            error
-                        ).classes(
-                            "text-xs "
+                        error_class = (
+                            (
+                                "text-warning"
+                            )
+                            if status
+                            in {
+                                "duplicate",
+                                "skipped",
+                            }
+                            else
                             "text-negative"
                         )
 
+                        ui.label(
+                            error
+                        ).classes(
+                            (
+                                "text-xs "
+                                f"{error_class}"
+                            )
+                        )
+
     #
-    # ARCHIVE SOURCE DISPLAY
+    # ARCHIVE SOURCE
     #
 
     def _render_source(
@@ -1342,12 +1707,31 @@ class RagChat:
             )
         )
 
+        vector_score = (
+            source.get(
+                "vector_score"
+            )
+        )
+
+        rerank_score = (
+            source.get(
+                "rerank_score"
+            )
+        )
+
         with ui.column().classes(
-            "w-full gap-1 q-mb-sm"
+            (
+                "w-full "
+                "gap-1 "
+                "q-mb-sm"
+            )
         ):
 
             with ui.row().classes(
-                "items-center gap-2"
+                (
+                    "items-center "
+                    "gap-2"
+                )
             ):
 
                 ui.badge(
@@ -1358,8 +1742,10 @@ class RagChat:
                 ui.label(
                     source_name
                 ).classes(
-                    "text-sm "
-                    "font-medium"
+                    (
+                        "text-sm "
+                        "font-medium"
+                    )
                 )
 
             if document_title:
@@ -1367,8 +1753,10 @@ class RagChat:
                 ui.label(
                     document_title
                 ).classes(
-                    "text-xs "
-                    "advisor-muted"
+                    (
+                        "text-xs "
+                        "advisor-muted"
+                    )
                 )
 
             if (
@@ -1382,8 +1770,10 @@ class RagChat:
                         f"{chunk_index}"
                     )
                 ).classes(
-                    "text-xs "
-                    "advisor-muted"
+                    (
+                        "text-xs "
+                        "advisor-muted"
+                    )
                 )
 
             if reference:
@@ -1406,8 +1796,11 @@ class RagChat:
                         reference,
                         new_tab=True,
                     ).classes(
-                        "text-xs "
-                        "text-primary"
+                        (
+                            "text-xs "
+                            "text-primary "
+                            "source-uri"
+                        )
                     )
 
                 else:
@@ -1415,23 +1808,13 @@ class RagChat:
                     ui.label(
                         reference
                     ).classes(
-                        "text-xs "
-                        "advisor-muted"
+                        (
+                            "text-xs "
+                            "advisor-muted"
+                        )
                     )
 
             scores = []
-
-            vector_score = (
-                source.get(
-                    "vector_score"
-                )
-            )
-
-            rerank_score = (
-                source.get(
-                    "rerank_score"
-                )
-            )
 
             if (
                 vector_score
@@ -1451,6 +1834,7 @@ class RagChat:
                     TypeError,
                     ValueError,
                 ):
+
                     pass
 
             if (
@@ -1471,23 +1855,28 @@ class RagChat:
                     TypeError,
                     ValueError,
                 ):
+
                     pass
 
             if scores:
 
                 ui.label(
-                    " · ".join(
-                        scores
+                    (
+                        " · ".join(
+                            scores
+                        )
                     )
                 ).classes(
-                    "text-xs "
-                    "advisor-muted"
+                    (
+                        "text-xs "
+                        "advisor-muted"
+                    )
                 )
 
             ui.separator()
 
     #
-    # ERROR
+    # ERROR MESSAGE
     #
 
     def _append_error_message(
@@ -1509,51 +1898,170 @@ class RagChat:
             raw_error.lower()
         )
 
+        title = (
+            "ADVISOR CORE ERROR"
+        )
+
+        #
+        # 429
+        #
+
         if (
-            "429" in raw_error
+            "429"
+            in raw_error
             or
             "rate limit"
             in lowered
             or
             "too_many_requests"
             in lowered
-        ):
-
-            message = (
-                "Advisor core quota exhausted. "
-                "Select another core or "
-                "try again later."
-            )
-
-        elif (
-            "403" in raw_error
             or
-            "access denied"
+            "quota exhausted"
+            in lowered
+            or
+            "quota exceeded"
             in lowered
         ):
 
-            message = (
-                "Advisor core access denied. "
-                "Check provider permissions "
-                "or network connection."
+            title = (
+                "CORE QUOTA EXHAUSTED"
             )
+
+            message = (
+                "The selected Advisor core "
+                "has reached its request or "
+                "quota limit. Select another "
+                "core or try again later."
+            )
+
+        #
+        # 403
+        #
+
+        elif (
+            "403"
+            in raw_error
+            or
+            "access denied"
+            in lowered
+            or
+            "forbidden"
+            in lowered
+        ):
+
+            title = (
+                "CORE ACCESS DENIED"
+            )
+
+            message = (
+                "The selected Advisor core "
+                "rejected access. Check the "
+                "provider account, model "
+                "permissions or network "
+                "connection."
+            )
+
+        #
+        # 503
+        #
+
+        elif (
+            "503"
+            in raw_error
+            or
+            "service_unavailable"
+            in lowered
+            or
+            "service unavailable"
+            in lowered
+            or
+            "high demand"
+            in lowered
+            or
+            "temporarily unavailable"
+            in lowered
+        ):
+
+            title = (
+                "CORE TEMPORARILY OVERLOADED"
+            )
+
+            message = (
+                "The selected Advisor core "
+                "is temporarily overloaded. "
+                "Automatic retry attempts "
+                "were exhausted. Try again "
+                "shortly or select another core."
+            )
+
+        #
+        # TIMEOUT
+        #
+
+        elif (
+            "timeout"
+            in lowered
+            or
+            "timed out"
+            in lowered
+        ):
+
+            if (
+                "gemini api"
+                in lowered
+                or
+                "groq api"
+                in lowered
+            ):
+
+                title = (
+                    "CORE NETWORK TIMEOUT"
+                )
+
+                message = (
+                    "The language model did "
+                    "not respond in time. "
+                    "Automatic retry attempts "
+                    "were exhausted."
+                )
+
+            else:
+
+                title = (
+                    "ARCHIVE NETWORK TIMEOUT"
+                )
+
+                message = (
+                    "A remote archive service "
+                    "did not respond in time. "
+                    "Automatic retries were "
+                    "exhausted. The request "
+                    "can be safely repeated."
+                )
 
         else:
 
             message = (
                 "The Advisor could not "
                 "complete the analysis. "
-                "Check CITY OPERATIONS LOG."
+                "Check CITY OPERATIONS LOG "
+                "for technical details."
             )
 
         with self.messages_container:
 
             with ui.row().classes(
-                "w-full justify-start"
+                (
+                    "w-full "
+                    "justify-start"
+                )
             ):
 
                 with ui.card().classes(
-                    "q-pa-md shadow-none"
+                    (
+                        "q-pa-md "
+                        "shadow-none"
+                    )
                 ).style(
                     (
                         "max-width: 84%; "
@@ -1563,23 +2071,36 @@ class RagChat:
                 ):
 
                     ui.label(
-                        "THE ADVISOR"
+                        title
                     ).classes(
-                        "text-xs "
-                        "text-negative"
+                        (
+                            "text-xs "
+                            "text-negative"
+                        )
                     )
+
+                    #
+                    # Even if final RAG failed,
+                    # show successfully performed
+                    # Web Recon to the user.
+                    #
 
                     if web_report:
 
                         self._render_web_recon(
-                            web_report.to_dict()
+                            (
+                                web_report
+                                .to_dict()
+                            )
                         )
 
                     ui.label(
                         message
                     ).classes(
-                        "text-sm "
-                        "whitespace-pre-wrap"
+                        (
+                            "text-sm "
+                            "whitespace-pre-wrap"
+                        )
                     )
 
                     ui.label(
@@ -1588,8 +2109,10 @@ class RagChat:
                             f"{model}"
                         )
                     ).classes(
-                        "text-xs "
-                        "advisor-muted"
+                        (
+                            "text-xs "
+                            "advisor-muted"
+                        )
                     )
 
     #
@@ -1604,15 +2127,18 @@ class RagChat:
             self.messages_container
             is None
         ):
+
             return
 
         with self.messages_container:
 
             with ui.column().classes(
-                "w-full "
-                "items-center "
-                "justify-center "
-                "q-py-xl"
+                (
+                    "w-full "
+                    "items-center "
+                    "justify-center "
+                    "q-py-xl"
+                )
             ) as empty_state:
 
                 ui.icon(
@@ -1628,9 +2154,11 @@ class RagChat:
                         "YOUR INQUIRY"
                     )
                 ).classes(
-                    "text-lg "
-                    "font-medium "
-                    "advisor-section-title"
+                    (
+                        "text-lg "
+                        "font-medium "
+                        "advisor-section-title"
+                    )
                 )
 
                 ui.label(
@@ -1640,9 +2168,11 @@ class RagChat:
                         "to acquire new records."
                     )
                 ).classes(
-                    "text-sm "
-                    "advisor-muted "
-                    "text-center"
+                    (
+                        "text-sm "
+                        "advisor-muted "
+                        "text-center"
+                    )
                 )
 
         self.empty_state = (
@@ -1657,6 +2187,7 @@ class RagChat:
             self.empty_state
             is None
         ):
+
             return
 
         self.empty_state.delete()
@@ -1671,6 +2202,7 @@ class RagChat:
             self.session_label
             is None
         ):
+
             return
 
         self.session_label.set_text(
@@ -1678,7 +2210,7 @@ class RagChat:
         )
 
     #
-    # PERSISTENCE METADATA
+    # METADATA
     #
 
     def _build_result_metadata(
@@ -1718,14 +2250,17 @@ class RagChat:
                     result
                     .retrieval_seconds
                 ),
+
                 "rerank": (
                     result
                     .rerank_seconds
                 ),
+
                 "generation": (
                     result
                     .generation_seconds
                 ),
+
                 "total": (
                     result
                     .total_seconds
@@ -1736,47 +2271,67 @@ class RagChat:
     @staticmethod
     def _serialize_sources(
         result: RagAnswer,
-    ) -> list[dict]:
+    ) -> list[
+        dict
+    ]:
 
         serialized = []
 
-        for source in result.sources:
+        for source in (
+            result.sources
+        ):
 
             serialized.append(
                 {
                     "citation": (
                         source.citation
                     ),
+
                     "source_id": (
                         source.source_id
                     ),
+
                     "document_id": (
-                        source.document_id
+                        source
+                        .document_id
                     ),
+
                     "chunk_id": (
                         source.chunk_id
                     ),
+
                     "source_name": (
-                        source.source_name
+                        source
+                        .source_name
                     ),
+
                     "source_type": (
-                        source.source_type
+                        source
+                        .source_type
                     ),
+
                     "document_title": (
                         source
                         .document_title
                     ),
+
                     "chunk_index": (
-                        source.chunk_index
+                        source
+                        .chunk_index
                     ),
+
                     "reference": (
                         source.reference
                     ),
+
                     "vector_score": (
-                        source.vector_score
+                        source
+                        .vector_score
                     ),
+
                     "rerank_score": (
-                        source.rerank_score
+                        source
+                        .rerank_score
                     ),
                 }
             )
@@ -1797,18 +2352,21 @@ class RagChat:
                     "retrieval"
                 ),
             ),
+
             (
                 "Analysis",
                 timing.get(
                     "rerank"
                 ),
             ),
+
             (
                 "Core",
                 timing.get(
                     "generation"
                 ),
             ),
+
             (
                 "Total",
                 timing.get(
@@ -1817,9 +2375,16 @@ class RagChat:
             ),
         ]
 
-        for label, value in values:
+        for (
+            label,
+            value,
+        ) in values:
 
-            if value is None:
+            if (
+                value
+                is None
+            ):
+
                 continue
 
             try:
@@ -1835,10 +2400,13 @@ class RagChat:
                 TypeError,
                 ValueError,
             ):
+
                 continue
 
-        return " · ".join(
-            parts
+        return (
+            " · ".join(
+                parts
+            )
         )
 
     #
@@ -1850,7 +2418,9 @@ class RagChat:
         busy: bool,
     ) -> None:
 
-        self.is_busy = busy
+        self.is_busy = (
+            busy
+        )
 
         controls = [
             self.question_input,
@@ -1873,11 +2443,17 @@ class RagChat:
 
         for control in controls:
 
-            if control is None:
+            if (
+                control
+                is None
+            ):
+
                 continue
 
             if busy:
+
                 control.disable()
 
             else:
+
                 control.enable()

@@ -10,6 +10,9 @@ from urllib.parse import (
 
 from ddgs import DDGS
 
+from src.grabber.web_grabber import (
+    web_grabber,
+)
 
 from src.services.indexing_service import (
     indexing_service,
@@ -18,7 +21,12 @@ from src.services.indexing_service import (
 from src.services.source_service import (
     DuplicateSourceError,
     InvalidSourceError,
+    SourceNotFoundError,
     source_service,
+)
+
+from src.vector_store.qdrant_store import (
+    qdrant_store,
 )
 
 
@@ -29,7 +37,6 @@ logger = logging.getLogger(
 
 @dataclass(frozen=True)
 class InternetSearchHit:
-
     title: str
     url: str
     snippet: str
@@ -37,14 +44,10 @@ class InternetSearchHit:
 
 @dataclass(frozen=True)
 class InternetImportResult:
-
     title: str
     url: str
-
     source_id: int | None
-
     status: str
-
     error: str | None = None
 
 
@@ -55,9 +58,7 @@ class InternetResearchService:
     def search(
         self,
         query: str,
-        max_results: int = (
-            DEFAULT_RESULTS
-        ),
+        max_results: int = DEFAULT_RESULTS,
     ) -> list[InternetSearchHit]:
 
         query = (
@@ -66,10 +67,8 @@ class InternetResearchService:
         ).strip()
 
         if not query:
-
             raise ValueError(
-                "Internet search query "
-                "cannot be empty."
+                "Internet search query cannot be empty."
             )
 
         max_results = max(
@@ -82,9 +81,8 @@ class InternetResearchService:
 
         logger.info(
             (
-                "Internet reconnaissance "
-                "started | query=%s | "
-                "max_results=%s"
+                "Internet reconnaissance started | "
+                "query=%s | max_results=%s"
             ),
             query,
             max_results,
@@ -98,16 +96,18 @@ class InternetResearchService:
                 query=query,
                 region="us-en",
                 safesearch="moderate",
-                max_results=(
-                    max_results
-                ),
+                max_results=max_results,
                 backend="auto",
             )
         )
 
-        hits = []
+        hits: list[
+            InternetSearchHit
+        ] = []
 
-        seen_urls = set()
+        seen_urls: set[
+            str
+        ] = set()
 
         for result in raw_results:
 
@@ -122,24 +122,16 @@ class InternetResearchService:
             if not url:
                 continue
 
-            parsed = (
-                urlsplit(
-                    url
-                )
+            parsed = urlsplit(
+                url
             )
 
-            if (
-                parsed.scheme
-                not in {
-                    "http",
-                    "https",
-                }
-            ):
+            if parsed.scheme not in {
+                "http",
+                "https",
+            }:
                 continue
 
-            #
-            # Strip fragment.
-            #
             normalized_url = (
                 parsed
                 ._replace(
@@ -148,40 +140,30 @@ class InternetResearchService:
                 .geturl()
             )
 
-            if (
-                normalized_url
-                in seen_urls
-            ):
+            if normalized_url in seen_urls:
                 continue
 
             seen_urls.add(
                 normalized_url
             )
 
-            title = (
-                str(
-                    result.get(
-                        "title",
-                        "",
-                    )
-                    or ""
+            title = str(
+                result.get(
+                    "title",
+                    "",
                 )
-                .strip()
-            )
+                or ""
+            ).strip()
 
-            snippet = (
-                str(
-                    result.get(
-                        "body",
-                        "",
-                    )
-                    or ""
+            snippet = str(
+                result.get(
+                    "body",
+                    "",
                 )
-                .strip()
-            )
+                or ""
+            ).strip()
 
             if not title:
-
                 title = (
                     parsed.hostname
                     or "Internet source"
@@ -197,9 +179,8 @@ class InternetResearchService:
 
         logger.info(
             (
-                "Internet reconnaissance "
-                "completed | query=%s | "
-                "results=%s"
+                "Internet reconnaissance completed | "
+                "query=%s | results=%s"
             ),
             query,
             len(hits),
@@ -210,19 +191,25 @@ class InternetResearchService:
     def import_hit(
         self,
         hit: InternetSearchHit,
+        *,
+        single_page: bool = False,
+        cleanup_on_failure: bool = False,
     ) -> InternetImportResult:
 
         logger.info(
             (
                 "Importing internet source | "
-                "title=%s | url=%s"
+                "title=%s | url=%s | "
+                "single_page=%s | "
+                "cleanup_on_failure=%s"
             ),
             hit.title,
             hit.url,
+            single_page,
+            cleanup_on_failure,
         )
 
         try:
-
             source = (
                 source_service
                 .add_url_source(
@@ -233,9 +220,9 @@ class InternetResearchService:
                 )
             )
 
-        except DuplicateSourceError:
+        except DuplicateSourceError as exc:
 
-            logger.warning(
+            logger.info(
                 (
                     "Internet source already "
                     "exists in archive | "
@@ -244,21 +231,17 @@ class InternetResearchService:
                 hit.url,
             )
 
-            return (
-                InternetImportResult(
-                    title=hit.title,
-                    url=hit.url,
-                    source_id=None,
-                    status="duplicate",
-                    error=(
-                        "Source already exists."
-                    ),
-                )
+            return InternetImportResult(
+                title=hit.title,
+                url=hit.url,
+                source_id=None,
+                status="duplicate",
+                error=str(exc),
             )
 
         except InvalidSourceError as exc:
 
-            logger.error(
+            logger.warning(
                 (
                     "Internet source rejected | "
                     "url=%s | error=%s"
@@ -267,52 +250,90 @@ class InternetResearchService:
                 exc,
             )
 
-            return (
-                InternetImportResult(
-                    title=hit.title,
-                    url=hit.url,
-                    source_id=None,
-                    status="failed",
-                    error=str(exc),
-                )
+            return InternetImportResult(
+                title=hit.title,
+                url=hit.url,
+                source_id=None,
+                status="failed",
+                error=str(exc),
             )
+
+        source_id = source.id
 
         logger.info(
             (
                 "Internet source stored in SQL | "
                 "source_id=%s | url=%s"
             ),
-            source.id,
+            source_id,
             hit.url,
         )
 
         try:
 
-            result = (
-                indexing_service
-                .index_source(
-                    source.id
+            #
+            # Automatic Web Recon should index
+            # only the exact page that was found.
+            #
+            if single_page:
+
+                logger.info(
+                    (
+                        "Single-page acquisition enabled | "
+                        "source_id=%s"
+                    ),
+                    source_id,
                 )
-            )
+
+                with web_grabber.crawl_limits(
+                    max_pages=1,
+                    max_depth=0,
+                ):
+                    result = (
+                        indexing_service
+                        .index_source(
+                            source_id
+                        )
+                    )
+
+            else:
+
+                result = (
+                    indexing_service
+                    .index_source(
+                        source_id
+                    )
+                )
 
         except Exception as exc:
 
             logger.exception(
                 (
-                    "Internet source indexing "
-                    "crashed | source_id=%s"
+                    "Internet source indexing crashed | "
+                    "source_id=%s"
                 ),
-                source.id,
+                source_id,
             )
 
-            return (
-                InternetImportResult(
-                    title=hit.title,
-                    url=hit.url,
-                    source_id=source.id,
-                    status="failed",
-                    error=str(exc),
+            cleaned = False
+
+            if cleanup_on_failure:
+                cleaned = (
+                    self._cleanup_failed_source(
+                        source_id
+                    )
                 )
+
+            return InternetImportResult(
+                title=hit.title,
+                url=hit.url,
+                source_id=(
+                    None
+                    if cleaned
+                    else source_id
+                ),
+                status="failed",
+                error=str(exc),
             )
 
         if result.status == "indexed":
@@ -322,45 +343,194 @@ class InternetResearchService:
                     "Internet source indexed | "
                     "source_id=%s | "
                     "documents_created=%s | "
+                    "documents_updated=%s | "
+                    "documents_skipped=%s | "
                     "chunks_created=%s"
                 ),
-                source.id,
+                source_id,
                 result.documents_created,
+                result.documents_updated,
+                result.documents_skipped,
                 result.chunks_created,
             )
 
-            return (
-                InternetImportResult(
-                    title=hit.title,
-                    url=hit.url,
-                    source_id=source.id,
-                    status="indexed",
-                )
+            return InternetImportResult(
+                title=hit.title,
+                url=hit.url,
+                source_id=source_id,
+                status="indexed",
             )
 
-        logger.error(
+        if result.status == "busy":
+
+            logger.warning(
+                (
+                    "Internet source is already "
+                    "being indexed | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+            return InternetImportResult(
+                title=hit.title,
+                url=hit.url,
+                source_id=source_id,
+                status="busy",
+                error=(
+                    result.error
+                    or
+                    "Source is already being indexed."
+                ),
+            )
+
+        logger.warning(
             (
-                "Internet source indexing "
-                "failed | source_id=%s | "
+                "Internet source indexing failed | "
+                "source_id=%s | "
+                "status=%s | "
                 "error=%s"
             ),
-            source.id,
+            source_id,
+            result.status,
             result.error,
         )
 
-        return (
-            InternetImportResult(
-                title=hit.title,
-                url=hit.url,
-                source_id=source.id,
-                status=(
-                    result.status
-                ),
-                error=(
-                    result.error
-                ),
+        cleaned = False
+
+        if cleanup_on_failure:
+            cleaned = (
+                self._cleanup_failed_source(
+                    source_id
+                )
             )
+
+        return InternetImportResult(
+            title=hit.title,
+            url=hit.url,
+            source_id=(
+                None
+                if cleaned
+                else source_id
+            ),
+            status=result.status,
+            error=result.error,
         )
+
+    def _cleanup_failed_source(
+        self,
+        source_id: int,
+    ) -> bool:
+
+        logger.info(
+            (
+                "Cleaning failed automatic source | "
+                "source_id=%s"
+            ),
+            source_id,
+        )
+
+        qdrant_cleaned = False
+        sql_cleaned = False
+
+        #
+        # Qdrant first.
+        #
+        # SQL deletion cascades documents/chunks,
+        # so while those IDs still exist we retain
+        # all information needed for diagnostics.
+        #
+        try:
+            qdrant_store.delete_by_source_id(
+                source_id
+            )
+
+            qdrant_cleaned = True
+
+            logger.info(
+                (
+                    "Failed source vectors removed | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+        except Exception:
+
+            logger.exception(
+                (
+                    "Could not completely remove "
+                    "failed source from Qdrant | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+        #
+        # Remove SQL source and cascaded
+        # documents/chunks.
+        #
+        try:
+            source_service.delete_source(
+                source_id
+            )
+
+            sql_cleaned = True
+
+            logger.info(
+                (
+                    "Failed automatic source "
+                    "removed from SQL | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+        except SourceNotFoundError:
+
+            #
+            # Source already disappeared.
+            # Treat SQL cleanup as complete.
+            #
+            sql_cleaned = True
+
+            logger.info(
+                (
+                    "Failed automatic source "
+                    "already absent from SQL | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+        except Exception:
+
+            logger.exception(
+                (
+                    "Could not remove failed "
+                    "source from SQL | "
+                    "source_id=%s"
+                ),
+                source_id,
+            )
+
+        logger.info(
+            (
+                "Failed source cleanup completed | "
+                "source_id=%s | "
+                "sql=%s | qdrant=%s"
+            ),
+            source_id,
+            sql_cleaned,
+            qdrant_cleaned,
+        )
+
+        #
+        # Returning True means the SQL Source
+        # no longer exists, therefore callers
+        # should not expose its source_id.
+        #
+        return sql_cleaned
 
 
 internet_research_service = (

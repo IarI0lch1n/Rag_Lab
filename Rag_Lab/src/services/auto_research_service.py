@@ -1,12 +1,16 @@
 import logging
+import re
 
 from dataclasses import (
     asdict,
     dataclass,
 )
 
+from urllib.parse import (
+    urlsplit,
+)
+
 from src.services.internet_research_service import (
-    InternetSearchHit,
     internet_research_service,
 )
 
@@ -20,6 +24,7 @@ logger = logging.getLogger(
 class AutoResearchSource:
 
     title: str
+
     url: str
 
     status: str
@@ -78,17 +83,23 @@ class AutoResearchReport:
             "query": (
                 self.query
             ),
+
             "hits_found": (
                 self.hits_found
             ),
+
             "indexed_count": (
                 self.indexed_count
             ),
+
             "duplicate_count": (
                 self.duplicate_count
             ),
+
             "sources": [
-                asdict(source)
+                asdict(
+                    source
+                )
                 for source
                 in self.sources
             ],
@@ -103,6 +114,45 @@ class AutoResearchService:
 
     TARGET_INDEXED_SOURCES = 1
 
+    #
+    # These sites may be useful search
+    # results, but are poor candidates
+    # for automatic crawling.
+    #
+
+    BLOCKED_AUTO_DOMAINS = {
+        "steamcommunity.com",
+    }
+
+    SEARCH_PREFIX_PATTERNS = (
+        (
+            r"^\s*(?:пожалуйста\s+)?"
+            r"(?:поищи|найди|посмотри)"
+            r"(?:\s+тогда)?"
+            r"(?:\s+мне)?"
+            r"(?:\s+ответ)?"
+            r"(?:\s+в\s+интернете"
+            r"|\s+в\s+сети"
+            r"|\s+онлайн)?"
+            r"(?:\s+информацию)?"
+            r"(?:\s+про|\s+о|\s+об)?"
+            r"(?:\s+то)?"
+            r"[\s,:;-]*"
+        ),
+
+        (
+            r"^\s*(?:please\s+)?"
+            r"(?:search|find|look\s+up)"
+            r"(?:\s+the)?"
+            r"(?:\s+answer)?"
+            r"(?:\s+online"
+            r"|\s+on\s+the\s+web"
+            r"|\s+on\s+the\s+internet)?"
+            r"(?:\s+for|\s+about)?"
+            r"[\s,:;-]*"
+        ),
+    )
+
     def research(
         self,
         question: str,
@@ -116,8 +166,10 @@ class AutoResearchService:
         if not question:
 
             raise ValueError(
-                "Research question "
-                "cannot be empty."
+                (
+                    "Research question "
+                    "cannot be empty."
+                )
             )
 
         web_query = (
@@ -135,10 +187,6 @@ class AutoResearchService:
             web_query,
         )
 
-        #
-        # STEP 1:
-        # Search open web.
-        #
         hits = (
             internet_research_service
             .search(
@@ -164,25 +212,14 @@ class AutoResearchService:
 
         if not hits:
 
-            logger.info(
-                (
-                    "Automatic web recon "
-                    "found no sources | "
-                    "query=%s"
-                ),
-                web_query,
+            return (
+                AutoResearchReport(
+                    query=web_query,
+                    hits_found=0,
+                    sources=[],
+                )
             )
 
-            return AutoResearchReport(
-                query=web_query,
-                hits_found=0,
-                sources=[],
-            )
-
-        #
-        # STEP 2:
-        # Try the highest-ranked results.
-        #
         attempts = 0
 
         indexed = 0
@@ -191,8 +228,10 @@ class AutoResearchService:
 
             if (
                 attempts
-                >= self.MAX_IMPORT_ATTEMPTS
+                >= self
+                .MAX_IMPORT_ATTEMPTS
             ):
+
                 break
 
             if (
@@ -200,18 +239,54 @@ class AutoResearchService:
                 >= self
                 .TARGET_INDEXED_SOURCES
             ):
+
                 break
+
+            if (
+                self
+                ._is_blocked_domain(
+                    hit.url
+                )
+            ):
+
+                logger.info(
+                    (
+                        "Skipping automatic "
+                        "acquisition for "
+                        "restricted domain | "
+                        "url=%s"
+                    ),
+                    hit.url,
+                )
+
+                processed_sources.append(
+                    AutoResearchSource(
+                        title=hit.title,
+                        url=hit.url,
+                        status="skipped",
+                        error=(
+                            "Source discovered, "
+                            "but this domain is "
+                            "not suitable for "
+                            "automatic acquisition."
+                        ),
+                    )
+                )
+
+                continue
 
             attempts += 1
 
             logger.info(
                 (
                     "Evaluating web source | "
-                    "attempt=%s | "
+                    "attempt=%s/%s | "
                     "title=%s | "
                     "url=%s"
                 ),
                 attempts,
+                self
+                .MAX_IMPORT_ATTEMPTS,
                 hit.title,
                 hit.url,
             )
@@ -221,7 +296,11 @@ class AutoResearchService:
                 result = (
                     internet_research_service
                     .import_hit(
-                        hit
+                        hit,
+                        single_page=True,
+                        cleanup_on_failure=(
+                            True
+                        ),
                     )
                 )
 
@@ -229,8 +308,9 @@ class AutoResearchService:
 
                 logger.exception(
                     (
-                        "Automatic web source "
-                        "processing crashed | "
+                        "Automatic web "
+                        "source processing "
+                        "crashed | "
                         "url=%s"
                     ),
                     hit.url,
@@ -252,7 +332,8 @@ class AutoResearchService:
                     title=hit.title,
                     url=hit.url,
                     source_id=(
-                        result.source_id
+                        result
+                        .source_id
                     ),
                     status=(
                         result.status
@@ -272,8 +353,8 @@ class AutoResearchService:
 
                 logger.info(
                     (
-                        "Web source added to "
-                        "Advisor archive | "
+                        "Web source added "
+                        "to Advisor archive | "
                         "source_id=%s | "
                         "url=%s"
                     ),
@@ -299,8 +380,8 @@ class AutoResearchService:
 
                 logger.warning(
                     (
-                        "Web source could not "
-                        "be indexed | "
+                        "Web source could "
+                        "not be indexed | "
                         "status=%s | "
                         "url=%s | "
                         "error=%s"
@@ -313,8 +394,8 @@ class AutoResearchService:
         report = (
             AutoResearchReport(
                 query=web_query,
-                hits_found=len(
-                    hits
+                hits_found=(
+                    len(hits)
                 ),
                 sources=(
                     processed_sources
@@ -341,29 +422,107 @@ class AutoResearchService:
 
         return report
 
-    @staticmethod
+    @classmethod
+    def _is_blocked_domain(
+        cls,
+        url: str,
+    ) -> bool:
+
+        hostname = (
+            urlsplit(
+                url
+            ).hostname
+            or ""
+        ).lower()
+
+        return any(
+            (
+                hostname == domain
+                or hostname.endswith(
+                    "."
+                    + domain
+                )
+            )
+            for domain
+            in cls
+            .BLOCKED_AUTO_DOMAINS
+        )
+
+    @classmethod
     def _build_web_query(
+        cls,
         question: str,
     ) -> str:
 
-        normalized = (
-            question.lower()
+        query = (
+            question.strip()
         )
 
-        #
-        # Advisor is specialized for
-        # the Frostpunk universe.
-        #
-        if (
-            "frostpunk"
-            in normalized
+        for pattern in (
+            cls
+            .SEARCH_PREFIX_PATTERNS
         ):
 
-            return question
+            query = re.sub(
+                pattern,
+                "",
+                query,
+                count=1,
+                flags=(
+                    re.IGNORECASE
+                ),
+            )
 
-        return (
-            f"Frostpunk {question}"
+        query = re.sub(
+            r"\s+",
+            " ",
+            query,
+        ).strip(
+            " ,.;:-"
         )
+
+        if not query:
+
+            query = question.strip()
+
+        #
+        # Avoid sending huge conversational
+        # instructions to the search engine.
+        #
+
+        if len(query) > 240:
+
+            shortened = (
+                query[:240]
+                .rsplit(
+                    " ",
+                    1,
+                )[0]
+                .strip()
+            )
+
+            if shortened:
+
+                query = shortened
+
+        if (
+            "frostpunk"
+            not in query.casefold()
+        ):
+
+            query = (
+                f"Frostpunk {query}"
+            )
+
+        logger.info(
+            (
+                "Prepared web search query | "
+                "query=%s"
+            ),
+            query,
+        )
+
+        return query
 
 
 auto_research_service = (

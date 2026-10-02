@@ -1,7 +1,14 @@
 import logging
+import threading
 
 from collections import deque
+
+from contextlib import (
+    contextmanager,
+)
+
 from pathlib import Path
+
 from urllib.parse import (
     parse_qsl,
     quote,
@@ -32,8 +39,6 @@ logger = logging.getLogger(
 
 
 class WebGrabber(BaseGrabber):
-
-    TIMEOUT = 20.0
 
     USER_AGENT = (
         "Advisor-RAG/1.0 "
@@ -121,24 +126,184 @@ class WebGrabber(BaseGrabber):
         "Help:",
         "Thread:",
         "Blog:",
+
+        "Файл:",
+        "Категория:",
+        "Шаблон:",
+        "Участник:",
+        "Обсуждение:",
+        "Служебная:",
     }
+
+    WIKIPEDIA_IGNORED_PREFIXES = {
+        "Category:",
+        "Special:",
+        "Talk:",
+        "User:",
+        "User_talk:",
+        "Template:",
+        "File:",
+        "Help:",
+        "Wikipedia:",
+
+        "Категория:",
+        "Служебная:",
+        "Обсуждение:",
+        "Участник:",
+        "Шаблон:",
+        "Файл:",
+        "Справка:",
+        "Википедия:",
+        "Проект:",
+    }
+
+    WIKIPEDIA_IGNORED_QUERY_KEYS = {
+        "action",
+        "diff",
+        "oldid",
+        "redlink",
+    }
+
+    def __init__(
+        self,
+    ) -> None:
+
+        self._local = (
+            threading.local()
+        )
+
+    #
+    # TEMPORARY CRAWL OVERRIDE
+    #
+    # Used by OPEN WEB RECON.
+    # Thread-local means an automatic
+    # single-page crawl does not alter
+    # another request or manual indexing.
+    #
+
+    @contextmanager
+    def crawl_limits(
+        self,
+        max_pages: int | None = None,
+        max_depth: int | None = None,
+    ):
+
+        old_pages = getattr(
+            self._local,
+            "max_pages",
+            None,
+        )
+
+        old_depth = getattr(
+            self._local,
+            "max_depth",
+            None,
+        )
+
+        self._local.max_pages = (
+            max_pages
+        )
+
+        self._local.max_depth = (
+            max_depth
+        )
+
+        try:
+
+            yield
+
+        finally:
+
+            self._local.max_pages = (
+                old_pages
+            )
+
+            self._local.max_depth = (
+                old_depth
+            )
+
+    def _get_crawl_limits(
+        self,
+    ) -> tuple[int, int]:
+
+        max_pages = getattr(
+            self._local,
+            "max_pages",
+            None,
+        )
+
+        max_depth = getattr(
+            self._local,
+            "max_depth",
+            None,
+        )
+
+        if max_pages is None:
+
+            max_pages = (
+                settings
+                .web_crawl_max_pages
+            )
+
+        if max_depth is None:
+
+            max_depth = (
+                settings
+                .web_crawl_max_depth
+            )
+
+        return (
+            max(
+                1,
+                int(max_pages),
+            ),
+            max(
+                0,
+                int(max_depth),
+            ),
+        )
+
+    @property
+    def timeout(
+        self,
+    ) -> float:
+
+        return float(
+            settings
+            .web_http_timeout_seconds
+        )
+
+    #
+    # ENTRY POINT
+    #
 
     def grab(
         self,
         source: Source,
-    ) -> list[GrabbedDocument]:
+    ) -> list[
+        GrabbedDocument
+    ]:
 
-        if source.source_type != "web":
+        if (
+            source.source_type
+            != "web"
+        ):
+
             raise ValueError(
-                f"WebGrabber cannot process "
-                f"source type "
-                f"'{source.source_type}'."
+                (
+                    "WebGrabber cannot "
+                    "process source type "
+                    f"'{source.source_type}'."
+                )
             )
 
         if not source.uri:
+
             raise ValueError(
-                f"Source {source.id} "
-                f"has no URL."
+                (
+                    f"Source {source.id} "
+                    "has no URL."
+                )
             )
 
         root_url = (
@@ -147,14 +312,12 @@ class WebGrabber(BaseGrabber):
             )
         )
 
-        #
-        # Fandom / MediaWiki needs API-based
-        # retrieval because direct HTML may
-        # return HTTP 403.
-        #
-        if self._is_fandom_url(
-            root_url
+        if (
+            self._is_fandom_url(
+                root_url
+            )
         ):
+
             return (
                 self._grab_fandom(
                     root_url
@@ -167,10 +330,16 @@ class WebGrabber(BaseGrabber):
             )
         )
 
+    #
+    # STANDARD WEBSITE
+    #
+
     def _grab_standard_site(
         self,
         root_url: str,
-    ) -> list[GrabbedDocument]:
+    ) -> list[
+        GrabbedDocument
+    ]:
 
         root_host = (
             urlsplit(
@@ -179,14 +348,11 @@ class WebGrabber(BaseGrabber):
             or ""
         ).lower()
 
-        max_pages = (
-            settings
-            .web_crawl_max_pages
-        )
-
-        max_depth = (
-            settings
-            .web_crawl_max_depth
+        (
+            max_pages,
+            max_depth,
+        ) = (
+            self._get_crawl_limits()
         )
 
         queue = deque(
@@ -221,7 +387,7 @@ class WebGrabber(BaseGrabber):
 
         with httpx.Client(
             follow_redirects=True,
-            timeout=self.TIMEOUT,
+            timeout=self.timeout,
             headers={
                 "User-Agent": (
                     self.USER_AGENT
@@ -257,12 +423,14 @@ class WebGrabber(BaseGrabber):
                     )
 
                 except ValueError:
+
                     continue
 
                 if (
                     normalized_url
                     in visited
                 ):
+
                     continue
 
                 visited.add(
@@ -282,7 +450,10 @@ class WebGrabber(BaseGrabber):
                 except Exception as exc:
 
                     logger.warning(
-                        "Could not fetch %s: %s",
+                        (
+                            "Could not fetch "
+                            "%s: %s"
+                        ),
                         normalized_url,
                         exc,
                     )
@@ -292,10 +463,13 @@ class WebGrabber(BaseGrabber):
                         == root_url
                         and not documents
                     ):
+
                         raise RuntimeError(
-                            f"Could not download "
-                            f"'{root_url}': "
-                            f"{exc}"
+                            (
+                                "Could not download "
+                                f"'{root_url}': "
+                                f"{exc}"
+                            )
                         ) from exc
 
                     continue
@@ -334,17 +508,25 @@ class WebGrabber(BaseGrabber):
                     .lower()
                 )
 
-                if self._is_html(
-                    content_type,
-                    extension,
+                if (
+                    self._is_html(
+                        content_type,
+                        extension,
+                    )
                 ):
 
                     document = (
                         self
                         ._create_html_document(
-                            response=response,
-                            url=final_url,
-                            root_url=root_url,
+                            response=(
+                                response
+                            ),
+                            url=(
+                                final_url
+                            ),
+                            root_url=(
+                                root_url
+                            ),
                             depth=depth,
                             parent_url=(
                                 parent_url
@@ -357,19 +539,25 @@ class WebGrabber(BaseGrabber):
                     )
 
                     print(
-                        f"[Web] "
-                        f"{len(documents)}/"
-                        f"{max_pages} "
-                        f"depth={depth} "
-                        f"{final_url}"
+                        (
+                            f"[Web] "
+                            f"{len(documents)}/"
+                            f"{max_pages} "
+                            f"depth={depth} "
+                            f"{final_url}"
+                        )
                     )
 
-                    if depth < max_depth:
+                    if (
+                        depth
+                        < max_depth
+                    ):
 
                         links = (
                             self._extract_links(
                                 html=(
-                                    response.content
+                                    response
+                                    .content
                                 ),
                                 base_url=(
                                     final_url
@@ -406,7 +594,8 @@ class WebGrabber(BaseGrabber):
                     documents.append(
                         GrabbedDocument(
                             name=(
-                                self._get_filename(
+                                self
+                                ._get_filename(
                                     final_url
                                 )
                             ),
@@ -425,7 +614,9 @@ class WebGrabber(BaseGrabber):
                                 final_url
                             ),
                             metadata={
-                                "source": "web",
+                                "source": (
+                                    "web"
+                                ),
                                 "crawl_mode": (
                                     "website"
                                 ),
@@ -449,22 +640,33 @@ class WebGrabber(BaseGrabber):
         if not documents:
 
             raise ValueError(
-                f"No supported documents "
-                f"were found at "
-                f"'{root_url}'."
+                (
+                    "No supported documents "
+                    "were found at "
+                    f"'{root_url}'."
+                )
             )
 
         print(
-            f"[Web] Crawl completed: "
-            f"{len(documents)} documents."
+            (
+                "[Web] Crawl completed: "
+                f"{len(documents)} "
+                "documents."
+            )
         )
 
         return documents
 
+    #
+    # FANDOM / MEDIAWIKI
+    #
+
     def _grab_fandom(
         self,
         root_url: str,
-    ) -> list[GrabbedDocument]:
+    ) -> list[
+        GrabbedDocument
+    ]:
 
         parsed_root = (
             urlsplit(
@@ -481,12 +683,35 @@ class WebGrabber(BaseGrabber):
             parsed_root.path
         )
 
-        if "/wiki/" not in path:
+        if (
+            "/wiki/"
+            not in path
+        ):
 
             raise ValueError(
-                "Fandom source must point "
-                "to a wiki article URL."
+                (
+                    "Fandom source must "
+                    "point to a wiki "
+                    "article URL."
+                )
             )
+
+        #
+        # Example:
+        #
+        # /wiki/Frostpunk
+        #     prefix = ""
+        #
+        # /ru/wiki/Новый_Лондон
+        #     prefix = "/ru"
+        #
+
+        wiki_prefix = (
+            path.split(
+                "/wiki/",
+                1,
+            )[0]
+        )
 
         root_title = (
             unquote(
@@ -500,23 +725,25 @@ class WebGrabber(BaseGrabber):
         if not root_title:
 
             raise ValueError(
-                "Could not determine "
-                "the Fandom article title."
+                (
+                    "Could not determine "
+                    "the Fandom article "
+                    "title."
+                )
             )
 
         api_url = (
             f"{parsed_root.scheme}"
-            f"://{host}/api.php"
+            f"://{host}"
+            f"{wiki_prefix}"
+            f"/api.php"
         )
 
-        max_pages = (
-            settings
-            .web_crawl_max_pages
-        )
-
-        max_depth = (
-            settings
-            .web_crawl_max_depth
+        (
+            max_pages,
+            max_depth,
+        ) = (
+            self._get_crawl_limits()
         )
 
         queue = deque(
@@ -540,6 +767,11 @@ class WebGrabber(BaseGrabber):
         )
 
         print(
+            f"[Fandom] API: "
+            f"{api_url}"
+        )
+
+        print(
             f"[Fandom] Root article: "
             f"{root_title}"
         )
@@ -556,7 +788,7 @@ class WebGrabber(BaseGrabber):
 
         with httpx.Client(
             follow_redirects=True,
-            timeout=self.TIMEOUT,
+            timeout=self.timeout,
             headers={
                 "User-Agent": (
                     self.USER_AGENT
@@ -582,7 +814,10 @@ class WebGrabber(BaseGrabber):
 
                 normalized_title = (
                     page_title
-                    .replace("_", " ")
+                    .replace(
+                        "_",
+                        " "
+                    )
                     .strip()
                 )
 
@@ -592,6 +827,7 @@ class WebGrabber(BaseGrabber):
                 )
 
                 if key in visited:
+
                     continue
 
                 visited.add(
@@ -643,27 +879,24 @@ class WebGrabber(BaseGrabber):
 
                     if (
                         not documents
-                        and key
-                        == (
-                            root_title
-                            .replace(
-                                "_",
-                                " "
-                            )
-                            .casefold()
-                        )
+                        and depth == 0
                     ):
 
                         raise RuntimeError(
-                            "Could not retrieve "
-                            "the Fandom article "
-                            "through MediaWiki API: "
-                            f"{exc}"
+                            (
+                                "Could not retrieve "
+                                "the Fandom article "
+                                "through MediaWiki "
+                                f"API: {exc}"
+                            )
                         ) from exc
 
                     continue
 
-                if "error" in data:
+                if (
+                    "error"
+                    in data
+                ):
 
                     logger.warning(
                         (
@@ -671,7 +904,9 @@ class WebGrabber(BaseGrabber):
                             "for %s: %s"
                         ),
                         normalized_title,
-                        data["error"],
+                        data[
+                            "error"
+                        ],
                     )
 
                     continue
@@ -713,10 +948,12 @@ class WebGrabber(BaseGrabber):
                     continue
 
                 article_path = quote(
-                    resolved_title
-                    .replace(
-                        " ",
-                        "_"
+                    (
+                        resolved_title
+                        .replace(
+                            " ",
+                            "_"
+                        )
                     ),
                     safe="/:'()-",
                 )
@@ -724,6 +961,7 @@ class WebGrabber(BaseGrabber):
                 article_url = (
                     f"{parsed_root.scheme}"
                     f"://{host}"
+                    f"{wiki_prefix}"
                     f"/wiki/"
                     f"{article_path}"
                 )
@@ -732,9 +970,9 @@ class WebGrabber(BaseGrabber):
                     "<html>"
                     "<head>"
                     "<meta charset='utf-8'>"
-                    f"<title>"
+                    "<title>"
                     f"{resolved_title}"
-                    f"</title>"
+                    "</title>"
                     "</head>"
                     "<body>"
                     f"{raw_html}"
@@ -766,7 +1004,9 @@ class WebGrabber(BaseGrabber):
                             article_url
                         ),
                         metadata={
-                            "source": "web",
+                            "source": (
+                                "web"
+                            ),
                             "platform": (
                                 "fandom"
                             ),
@@ -783,22 +1023,27 @@ class WebGrabber(BaseGrabber):
                                 depth
                             ),
                             "is_root": (
-                                len(documents)
-                                == 1
+                                depth == 0
                             ),
                         },
                     )
                 )
 
                 print(
-                    f"[Fandom] "
-                    f"{len(documents)}/"
-                    f"{max_pages} "
-                    f"depth={depth} "
-                    f"{resolved_title}"
+                    (
+                        f"[Fandom] "
+                        f"{len(documents)}/"
+                        f"{max_pages} "
+                        f"depth={depth} "
+                        f"{resolved_title}"
+                    )
                 )
 
-                if depth >= max_depth:
+                if (
+                    depth
+                    >= max_depth
+                ):
+
                     continue
 
                 links = (
@@ -810,8 +1055,9 @@ class WebGrabber(BaseGrabber):
                         base_url=(
                             article_url
                         ),
-                        host=(
-                            host
+                        host=host,
+                        wiki_prefix=(
+                            wiki_prefix
                         ),
                     )
                 )
@@ -834,6 +1080,7 @@ class WebGrabber(BaseGrabber):
                         linked_key
                         in visited
                     ):
+
                         continue
 
                     queue.append(
@@ -847,13 +1094,19 @@ class WebGrabber(BaseGrabber):
         if not documents:
 
             raise ValueError(
-                "No Fandom wiki articles "
-                "could be retrieved."
+                (
+                    "No Fandom wiki "
+                    "articles could be "
+                    "retrieved."
+                )
             )
 
         print(
-            f"[Fandom] Crawl completed: "
-            f"{len(documents)} articles."
+            (
+                "[Fandom] Crawl completed: "
+                f"{len(documents)} "
+                "articles."
+            )
         )
 
         return documents
@@ -863,6 +1116,7 @@ class WebGrabber(BaseGrabber):
         html: bytes,
         base_url: str,
         host: str,
+        wiki_prefix: str,
     ) -> list[
         tuple[str, str]
     ]:
@@ -873,6 +1127,19 @@ class WebGrabber(BaseGrabber):
         )
 
         found = {}
+
+        wiki_path_prefix = (
+            f"{wiki_prefix}/wiki/"
+        )
+
+        if not wiki_path_prefix.startswith(
+            "/"
+        ):
+
+            wiki_path_prefix = (
+                "/"
+                + wiki_path_prefix
+            )
 
         for anchor in soup.find_all(
             "a",
@@ -887,6 +1154,7 @@ class WebGrabber(BaseGrabber):
             ).strip()
 
             if not href:
+
                 continue
 
             absolute_url = (
@@ -909,27 +1177,30 @@ class WebGrabber(BaseGrabber):
                 ).lower()
                 != host
             ):
+
                 continue
 
             if not (
                 parsed.path
                 .startswith(
-                    "/wiki/"
+                    wiki_path_prefix
                 )
             ):
+
                 continue
 
             raw_title = (
                 unquote(
                     parsed.path[
                         len(
-                            "/wiki/"
+                            wiki_path_prefix
                         ):
                     ]
                 )
             )
 
             if not raw_title:
+
                 continue
 
             title = (
@@ -947,6 +1218,7 @@ class WebGrabber(BaseGrabber):
                     title
                 )
             ):
+
                 continue
 
             normalized_url = (
@@ -980,9 +1252,12 @@ class WebGrabber(BaseGrabber):
             .FANDOM_IGNORED_PREFIXES
         ):
 
-            if lowered.startswith(
-                prefix.casefold()
+            if (
+                lowered.startswith(
+                    prefix.casefold()
+                )
             ):
+
                 return True
 
         return False
@@ -999,11 +1274,13 @@ class WebGrabber(BaseGrabber):
             or ""
         ).lower()
 
-        return (
-            hostname.endswith(
-                ".fandom.com"
-            )
+        return hostname.endswith(
+            ".fandom.com"
         )
+
+    #
+    # HTML
+    #
 
     def _create_html_document(
         self,
@@ -1047,11 +1324,15 @@ class WebGrabber(BaseGrabber):
             file_extension=".html",
             external_id=url,
             metadata={
-                "source": "web",
+                "source": (
+                    "web"
+                ),
                 "crawl_mode": (
                     "website"
                 ),
-                "url": url,
+                "url": (
+                    url
+                ),
                 "parent_url": (
                     parent_url
                 ),
@@ -1059,10 +1340,15 @@ class WebGrabber(BaseGrabber):
                     depth
                 ),
                 "is_root": (
-                    url == root_url
+                    url
+                    == root_url
                 ),
             },
         )
+
+    #
+    # LINKS
+    #
 
     def _extract_links(
         self,
@@ -1080,22 +1366,29 @@ class WebGrabber(BaseGrabber):
             soup.find(
                 "main"
             )
-            or soup.find(
+            or
+            soup.find(
                 "article"
             )
-            or soup.find(
+            or
+            soup.find(
                 attrs={
-                    "role": "main"
+                    "role": (
+                        "main"
+                    )
                 }
             )
-            or soup.body
-            or soup
+            or
+            soup.body
+            or
+            soup
         )
 
         links = set()
 
         for anchor in (
-            content_root.find_all(
+            content_root
+            .find_all(
                 "a",
                 href=True,
             )
@@ -1109,6 +1402,7 @@ class WebGrabber(BaseGrabber):
             ).strip()
 
             if not href:
+
                 continue
 
             if href.startswith(
@@ -1120,6 +1414,7 @@ class WebGrabber(BaseGrabber):
                     "data:",
                 )
             ):
+
                 continue
 
             absolute_url = (
@@ -1138,6 +1433,7 @@ class WebGrabber(BaseGrabber):
                 )
 
             except ValueError:
+
                 continue
 
             parsed = (
@@ -1155,6 +1451,7 @@ class WebGrabber(BaseGrabber):
                 hostname
                 != root_host
             ):
+
                 continue
 
             if (
@@ -1162,6 +1459,16 @@ class WebGrabber(BaseGrabber):
                     parsed.path
                 )
             ):
+
+                continue
+
+            if (
+                self
+                ._is_ignored_wikipedia_url(
+                    parsed
+                )
+            ):
+
                 continue
 
             extension = (
@@ -1177,6 +1484,7 @@ class WebGrabber(BaseGrabber):
                 in self
                 .SKIPPED_EXTENSIONS
             ):
+
                 continue
 
             if (
@@ -1185,6 +1493,7 @@ class WebGrabber(BaseGrabber):
                 not in self
                 .ALLOWED_EXTENSIONS
             ):
+
                 continue
 
             links.add(
@@ -1193,6 +1502,81 @@ class WebGrabber(BaseGrabber):
 
         return sorted(
             links
+        )
+
+    def _is_ignored_wikipedia_url(
+        self,
+        parsed,
+    ) -> bool:
+
+        hostname = (
+            parsed.hostname
+            or ""
+        ).lower()
+
+        if not (
+            hostname
+            == "wikipedia.org"
+            or hostname.endswith(
+                ".wikipedia.org"
+            )
+        ):
+
+            return False
+
+        query_keys = {
+            key.casefold()
+            for key, _
+            in parse_qsl(
+                parsed.query,
+                keep_blank_values=True,
+            )
+        }
+
+        if (
+            query_keys
+            & self
+            .WIKIPEDIA_IGNORED_QUERY_KEYS
+        ):
+
+            return True
+
+        decoded_path = (
+            unquote(
+                parsed.path
+            )
+        )
+
+        if (
+            "/wiki/"
+            not in decoded_path
+        ):
+
+            return False
+
+        title = (
+            decoded_path
+            .split(
+                "/wiki/",
+                1,
+            )[1]
+            .replace(
+                "_",
+                " "
+            )
+        )
+
+        lowered = (
+            title.casefold()
+        )
+
+        return any(
+            lowered.startswith(
+                prefix.casefold()
+            )
+            for prefix
+            in self
+            .WIKIPEDIA_IGNORED_PREFIXES
         )
 
     def _is_ignored_path(
@@ -1212,6 +1596,10 @@ class WebGrabber(BaseGrabber):
             & self.IGNORED_PATH_PARTS
         )
 
+    #
+    # CONTENT TYPES
+    #
+
     @staticmethod
     def _is_html(
         content_type: str,
@@ -1222,6 +1610,7 @@ class WebGrabber(BaseGrabber):
             "text/html",
             "application/xhtml+xml",
         }:
+
             return True
 
         if (
@@ -1231,6 +1620,7 @@ class WebGrabber(BaseGrabber):
                 "application/octet-stream",
             }
         ):
+
             return False
 
         return extension in {
@@ -1249,6 +1639,7 @@ class WebGrabber(BaseGrabber):
             extension
             in self.ALLOWED_EXTENSIONS
         ):
+
             return True
 
         return content_type in {
@@ -1259,6 +1650,7 @@ class WebGrabber(BaseGrabber):
             "application/json",
             "application/xml",
             "text/xml",
+
             (
                 "application/vnd."
                 "openxmlformats-"
@@ -1266,6 +1658,7 @@ class WebGrabber(BaseGrabber):
                 "wordprocessingml."
                 "document"
             ),
+
             (
                 "application/vnd."
                 "openxmlformats-"
@@ -1274,6 +1667,10 @@ class WebGrabber(BaseGrabber):
                 "presentation"
             ),
         }
+
+    #
+    # URL NORMALIZATION
+    #
 
     def normalize_url(
         self,
@@ -1293,9 +1690,12 @@ class WebGrabber(BaseGrabber):
                 "https",
             }
         ):
+
             raise ValueError(
-                f"Unsupported URL: "
-                f"{url}"
+                (
+                    "Unsupported URL: "
+                    f"{url}"
+                )
             )
 
         host = (
@@ -1306,8 +1706,10 @@ class WebGrabber(BaseGrabber):
         if not host:
 
             raise ValueError(
-                f"Invalid URL: "
-                f"{url}"
+                (
+                    "Invalid URL: "
+                    f"{url}"
+                )
             )
 
         scheme = (
@@ -1336,7 +1738,9 @@ class WebGrabber(BaseGrabber):
 
         else:
 
-            netloc = host
+            netloc = (
+                host
+            )
 
         query_items = [
             (
@@ -1405,6 +1809,7 @@ class WebGrabber(BaseGrabber):
         )
 
         if filename:
+
             return filename
 
         return (

@@ -1,0 +1,287 @@
+{
+  "version": 1,
+  "domain": "Frostpunk",
+  "description": "Evaluation dataset for The Advisor RAG system. Includes factual, contextual, multi-document, multilingual and unanswerable questions.",
+  "cases": [
+    {
+      "id": "fp-001",
+      "question": "What happened in The Arks scenario?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [
+        10468
+      ],
+      "labeled": true,
+      "notes": "Scenario overview."
+    },
+    {
+      "id": "fp-002",
+      "question": "Why were the seedling arks important?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [
+        10471
+      ],
+      "labeled": true,
+      "notes": "The Arks."
+    },
+    {
+      "id": "fp-003",
+      "question": "What happens if New Manchester is helped during The Arks scenario?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [
+        10405
+      ],
+      "labeled": true,
+      "notes": "The Arks and New Manchester."
+    },
+    {
+      "id": "fp-004",
+      "question": "Why is the Generator important for the survival of the city?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [
+        10371
+      ],
+      "labeled": true,
+      "notes": "Core Frostpunk mechanic."
+    },
+    {
+      "id": "fp-005",
+      "question": "What are Steam Cores used for in Frostpunk?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [
+        10317
+      ],
+      "labeled": true,
+      "notes": "Resource and technology question."
+    },
+    {
+      "id": "fp-006",
+      "question": "What is the purpose of the Beacon?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Exploration mechanic."
+    },
+    {
+      "id": "fp-007",
+      "question": "Why are Scouts important to New London?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Exploration and resources."
+    },
+    {
+      "id": "fp-008",
+      "question": "What is an Automaton and what work can it perform?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Technology and workforce."
+    },
+    {
+      "id": "fp-009",
+      "question": "What caused the fall of Winterhome?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Fall of Winterhome."
+    },
+    {
+      "id": "fp-010",
+      "question": "What is Tesla City and why can it be important to the player?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Exploration location."
+    },
+    {
+      "id": "fp-011",
+      "question": "What is the main conflict in The Refugees scenario?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Scenario overview."
+    },
+    {
+      "id": "fp-012",
+      "question": "What is the central objective of The Last Autumn scenario?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "The Last Autumn."
+    },
+    {
+      "id": "fp-013",
+      "question": "How do Hope and Discontent affect the city?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Social mechanics."
+    },
+    {
+      "id": "fp-014",
+      "question": "What is the difference between the Order and Faith purpose paths?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Multi-document comparison."
+    },
+    {
+      "id": "fp-015",
+      "question": "Who are the Londoners and why do they become a problem for New London?",
+      "language": "en",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "A New Home story."
+    },
+    {
+      "id": "fp-016",
+      "question": "Для чего Нью-Лондону нужен Генератор?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Russian cross-language retrieval."
+    },
+    {
+      "id": "fp-017",
+      "question": "Почему разведчики важны для выживания города?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Russian exploration question."
+    },
+    {
+      "id": "fp-018",
+      "question": "Что произошло с Винтерхоумом?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Winterhome in Russian."
+    },
+    {
+      "id": "fp-019",
+      "question": "Для чего используются паровые ядра?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Steam Cores in Russian."
+    },
+    {
+      "id": "fp-020",
+      "question": "Что происходит в сценарии Ковчеги?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "The Arks in Russian."
+    },
+    {
+      "id": "fp-021",
+      "question": "Зачем в сценарии Ковчеги необходимо сохранять растения?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Specific scenario fact."
+    },
+    {
+      "id": "fp-022",
+      "question": "Какую роль играет уголь в работе города?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Resource mechanics."
+    },
+    {
+      "id": "fp-023",
+      "question": "Что такое форсаж Генератора и зачем он используется?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Generator Overdrive."
+    },
+    {
+      "id": "fp-024",
+      "question": "Чем отличаются охотничьи хижины от теплиц как источники пищи?",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Comparison requiring contextual retrieval."
+    },
+    {
+      "id": "fp-025",
+      "question": "Сравни основные цели сценариев Новый дом и Ковчеги.",
+      "language": "ru",
+      "answerable": true,
+      "relevant_document_ids": [],
+      "labeled": false,
+      "notes": "Multi-document question."
+    },
+    {
+      "id": "fp-026",
+      "question": "Who is the mayor of Night City in Frostpunk?",
+      "language": "en",
+      "answerable": false,
+      "relevant_document_ids": [],
+      "labeled": true,
+      "notes": "Deliberately out-of-domain hallucination test."
+    },
+    {
+      "id": "fp-027",
+      "question": "What weapons are used by the Brotherhood of Steel in Frostpunk?",
+      "language": "en",
+      "answerable": false,
+      "relevant_document_ids": [],
+      "labeled": true,
+      "notes": "Deliberately unrelated fictional universe."
+    },
+    {
+      "id": "fp-028",
+      "question": "Кто является президентом Новой Калифорнийской Республики в Frostpunk?",
+      "language": "ru",
+      "answerable": false,
+      "relevant_document_ids": [],
+      "labeled": true,
+      "notes": "Out-of-domain hallucination test."
+    },
+    {
+      "id": "fp-029",
+      "question": "Какой официальный курс доллара действует сегодня в Нью-Лондоне?",
+      "language": "ru",
+      "answerable": false,
+      "relevant_document_ids": [],
+      "labeled": true,
+      "notes": "Information should not exist in the archive."
+    },
+    {
+      "id": "fp-030",
+      "question": "What was the exact real-world temperature in Paris on every day of January 2025?",
+      "language": "en",
+      "answerable": false,
+      "relevant_document_ids": [],
+      "labeled": true,
+      "notes": "Out-of-domain factual request."
+    }
+  ]
+}

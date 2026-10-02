@@ -84,7 +84,9 @@
     <Compile Include="src\vector_store\__init__.py" />
     <Compile Include="src\__init__.py" />
     <Compile Include="tests\auto_research_test.py" />
+    <Compile Include="tests\build_evaluation_dataset.py" />
     <Compile Include="tests\chat_repository_test.py" />
+    <Compile Include="tests\evaluation_experiment.py" />
     <Compile Include="tests\internet_research_test.py" />
     <Compile Include="tests\langfuse_test.py" />
     <Compile Include="tests\langfuse_web_recon_test.py" />
@@ -127,6 +129,7 @@
     <Content Include=".env" />
     <Content Include=".env.example" />
     <Content Include="configs\default.yaml" />
+    <Content Include="data\evaluation_questions.json" />
     <Content Include="data\temp\.gitkeep" />
     <Content Include="data\uploads\.gitkeep" />
     <Content Include="experiments\.gitkeep" />

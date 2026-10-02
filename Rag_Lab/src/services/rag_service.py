@@ -1,6 +1,8 @@
 import time
 
-from dataclasses import dataclass
+from dataclasses import (
+    dataclass,
+)
 
 from src.generation.llm import (
     llm_manager,
@@ -10,6 +12,10 @@ from src.generation.prompts import (
     PromptSource,
     SYSTEM_PROMPT,
     build_rag_prompt,
+)
+
+from src.observability.langfuse_service import (
+    langfuse_service,
 )
 
 from src.reranking.reranker import (
@@ -36,17 +42,26 @@ class RagSource:
     document_title: str
     chunk_index: int
 
-    reference: str | None
+    reference: (
+        str
+        | None
+    )
 
     vector_score: float
-    rerank_score: float | None
+
+    rerank_score: (
+        float
+        | None
+    )
 
 
 @dataclass(frozen=True)
 class RagAnswer:
     answer: str
 
-    sources: list[RagSource]
+    sources: list[
+        RagSource
+    ]
 
     provider: str
     model: str
@@ -72,122 +87,371 @@ class RagService:
     def ask(
         self,
         question: str,
-        history: list[dict[str, str]] | None = None,
-        llm_provider: str | None = None,
-        llm_model: str | None = None,
+        history: (
+            list[
+                dict[
+                    str,
+                    str,
+                ]
+            ]
+            | None
+        ) = None,
+        llm_provider: (
+            str
+            | None
+        ) = None,
+        llm_model: (
+            str
+            | None
+        ) = None,
+        session_id: (
+            int
+            | str
+            | None
+        ) = None,
     ) -> RagAnswer:
 
-        question = question.strip()
+        question = (
+            question.strip()
+        )
 
         if not question:
+
             raise ValueError(
-                "Question cannot be empty."
+                (
+                    "Question cannot "
+                    "be empty."
+                )
             )
+
+        history = (
+            history
+            or []
+        )
+
+        langfuse_session_id = (
+            f"advisor-chat-{session_id}"
+            if session_id
+            is not None
+            else None
+        )
+
+        trace_input = {
+            "question": (
+                question
+            ),
+            "history_messages": (
+                len(history)
+            ),
+        }
+
+        trace_metadata = {
+            "requested_provider": (
+                llm_provider
+                or "default"
+            ),
+            "requested_model": (
+                llm_model
+                or "default"
+            ),
+            "candidate_count": (
+                self.CANDIDATE_COUNT
+            ),
+            "qdrant_limit": (
+                self.QDRANT_LIMIT
+            ),
+            "final_context_count": (
+                self.FINAL_CONTEXT_COUNT
+            ),
+        }
+
+        with (
+            langfuse_service
+            .trace(
+                name=(
+                    "advisor-rag-query"
+                ),
+                input_data=(
+                    trace_input
+                ),
+                session_id=(
+                    langfuse_session_id
+                ),
+                metadata=(
+                    trace_metadata
+                ),
+                tags=[
+                    "advisor",
+                    "rag",
+                ],
+            )
+        ) as trace:
+
+            return (
+                self._ask_inside_trace(
+                    question=(
+                        question
+                    ),
+                    history=(
+                        history
+                    ),
+                    llm_provider=(
+                        llm_provider
+                    ),
+                    llm_model=(
+                        llm_model
+                    ),
+                    trace=(
+                        trace
+                    ),
+                )
+            )
+
+    def _ask_inside_trace(
+        self,
+        *,
+        question: str,
+        history: list[
+            dict[
+                str,
+                str,
+            ]
+        ],
+        llm_provider: (
+            str
+            | None
+        ),
+        llm_model: (
+            str
+            | None
+        ),
+        trace,
+    ) -> RagAnswer:
 
         total_started = (
             time.perf_counter()
         )
 
         print()
-        print("=" * 80)
+        print(
+            "=" * 80
+        )
 
         print(
-            f"[RAG] Question: "
-            f"{question}"
+            (
+                "[RAG] Question: "
+                f"{question}"
+            )
         )
 
         if llm_provider:
+
             print(
-                f"[RAG] LLM provider: "
-                f"{llm_provider}"
+                (
+                    "[RAG] LLM provider: "
+                    f"{llm_provider}"
+                )
             )
 
         if llm_model:
+
             print(
-                f"[RAG] LLM model: "
-                f"{llm_model}"
+                (
+                    "[RAG] LLM model: "
+                    f"{llm_model}"
+                )
             )
 
-        print("=" * 80)
+        print(
+            "=" * 80
+        )
 
         #
-        # 1. Retrieval
+        # 1. RETRIEVAL
         #
+
         retrieval_started = (
             time.perf_counter()
         )
 
-        candidates = (
-            retriever.retrieve_candidates(
-                query=question,
-                limit=(
-                    self.CANDIDATE_COUNT
+        with (
+            langfuse_service
+            .observation(
+                name=(
+                    "rag-retrieval"
                 ),
-                qdrant_limit=(
-                    self.QDRANT_LIMIT
+                as_type=(
+                    "retriever"
                 ),
-                max_per_document=(
-                    self.MAX_PER_DOCUMENT
-                ),
-                debug=True,
+                input_data={
+                    "query": (
+                        question
+                    ),
+                    "candidate_limit": (
+                        self
+                        .CANDIDATE_COUNT
+                    ),
+                    "qdrant_limit": (
+                        self
+                        .QDRANT_LIMIT
+                    ),
+                    "max_per_document": (
+                        self
+                        .MAX_PER_DOCUMENT
+                    ),
+                },
+            )
+        ) as retrieval_observation:
+
+            candidates = (
+                retriever
+                .retrieve_candidates(
+                    query=question,
+                    limit=(
+                        self
+                        .CANDIDATE_COUNT
+                    ),
+                    qdrant_limit=(
+                        self
+                        .QDRANT_LIMIT
+                    ),
+                    max_per_document=(
+                        self
+                        .MAX_PER_DOCUMENT
+                    ),
+                    debug=True,
+                )
+            )
+
+            retrieval_seconds = (
+                time.perf_counter()
+                - retrieval_started
+            )
+
+            retrieval_observation.update(
+                output={
+                    "candidate_count": (
+                        len(candidates)
+                    ),
+                    "candidates": (
+                        self
+                        ._trace_chunks(
+                            candidates
+                        )
+                    ),
+                },
+                metadata={
+                    "duration_seconds": (
+                        retrieval_seconds
+                    ),
+                },
+            )
+
+        print(
+            (
+                "[RAG] Retrieval: "
+                f"{retrieval_seconds:.3f}s"
             )
         )
 
-        retrieval_seconds = (
-            time.perf_counter()
-            - retrieval_started
-        )
-
         print(
-            f"[RAG] Retrieval: "
-            f"{retrieval_seconds:.3f}s"
-        )
-
-        print(
-            f"[RAG] Candidates: "
-            f"{len(candidates)}"
+            (
+                "[RAG] Candidates: "
+                f"{len(candidates)}"
+            )
         )
 
         #
-        # 2. Reranking
+        # 2. RERANK
         #
+
         rerank_started = (
             time.perf_counter()
         )
 
-        if candidates:
-
-            reranked = (
-                reranker.rerank(
-                    query=question,
-                    candidates=candidates,
-                    top_k=(
-                        self.FINAL_CONTEXT_COUNT
+        with (
+            langfuse_service
+            .observation(
+                name=(
+                    "rag-reranking"
+                ),
+                as_type="span",
+                input_data={
+                    "query": (
+                        question
                     ),
+                    "candidate_count": (
+                        len(candidates)
+                    ),
+                    "top_k": (
+                        self
+                        .FINAL_CONTEXT_COUNT
+                    ),
+                },
+            )
+        ) as rerank_observation:
+
+            if candidates:
+
+                reranked = (
+                    reranker.rerank(
+                        query=question,
+                        candidates=(
+                            candidates
+                        ),
+                        top_k=(
+                            self
+                            .FINAL_CONTEXT_COUNT
+                        ),
+                    )
                 )
+
+            else:
+
+                reranked = []
+
+            rerank_seconds = (
+                time.perf_counter()
+                - rerank_started
             )
 
-        else:
-            reranked = []
+            rerank_observation.update(
+                output={
+                    "result_count": (
+                        len(reranked)
+                    ),
+                    "results": (
+                        self
+                        ._trace_chunks(
+                            reranked
+                        )
+                    ),
+                },
+                metadata={
+                    "duration_seconds": (
+                        rerank_seconds
+                    ),
+                },
+            )
 
-        rerank_seconds = (
-            time.perf_counter()
-            - rerank_started
+        print(
+            (
+                "[RAG] Rerank: "
+                f"{rerank_seconds:.3f}s"
+            )
         )
 
         print(
-            f"[RAG] Rerank: "
-            f"{rerank_seconds:.3f}s"
-        )
-
-        print(
-            f"[RAG] Reranked results: "
-            f"{len(reranked)}"
+            (
+                "[RAG] Reranked results: "
+                f"{len(reranked)}"
+            )
         )
 
         #
-        # 3. Limit final context size
+        # 3. LIMIT CONTEXT
         #
+
         selected_results = (
             self._limit_context(
                 reranked
@@ -195,57 +459,159 @@ class RagService:
         )
 
         print(
-            f"[RAG] Context chunks: "
-            f"{len(selected_results)}"
+            (
+                "[RAG] Context chunks: "
+                f"{len(selected_results)}"
+            )
         )
 
         #
-        # 4. Convert retrieved chunks
-        #    to prompt sources
+        # 4. PROMPT SOURCES
         #
+
         prompt_sources = (
-            self._build_prompt_sources(
+            self
+            ._build_prompt_sources(
                 selected_results
             )
         )
 
         #
-        # 5. Build final RAG prompt
+        # 5. PROMPT CONSTRUCTION
         #
-        prompt = (
-            build_rag_prompt(
-                question=question,
-                sources=prompt_sources,
-                history=history,
+
+        with (
+            langfuse_service
+            .observation(
+                name=(
+                    "rag-prompt-construction"
+                ),
+                as_type="chain",
+                input_data={
+                    "question": (
+                        question
+                    ),
+                    "source_count": (
+                        len(
+                            prompt_sources
+                        )
+                    ),
+                    "history_messages": (
+                        len(history)
+                    ),
+                },
             )
-        )
+        ) as prompt_observation:
+
+            prompt = (
+                build_rag_prompt(
+                    question=question,
+                    sources=(
+                        prompt_sources
+                    ),
+                    history=(
+                        history
+                    ),
+                )
+            )
+
+            prompt_observation.update(
+                output={
+                    "prompt_chars": (
+                        len(prompt)
+                    ),
+                    "context_chars": sum(
+                        len(
+                            result.text
+                            or ""
+                        )
+                        for result
+                        in selected_results
+                    ),
+                    "sources": (
+                        self
+                        ._trace_chunks(
+                            selected_results
+                        )
+                    ),
+                }
+            )
 
         #
-        # 6. LLM generation
+        # 6. LLM GENERATION
         #
+
         generation_started = (
             time.perf_counter()
         )
 
-        response = (
-            llm_manager.generate(
-                system_prompt=(
-                    SYSTEM_PROMPT
+        with (
+            langfuse_service
+            .observation(
+                name=(
+                    "rag-llm-generation"
                 ),
-                user_prompt=prompt,
-                provider=(
-                    llm_provider
+                as_type=(
+                    "generation"
                 ),
+                input_data={
+                    "system_prompt": (
+                        SYSTEM_PROMPT
+                    ),
+                    "user_prompt": (
+                        prompt
+                    ),
+                },
+                metadata={
+                    "provider": (
+                        llm_provider
+                        or "default"
+                    ),
+                },
                 model=(
                     llm_model
                 ),
             )
-        )
+        ) as generation_observation:
 
-        generation_seconds = (
-            time.perf_counter()
-            - generation_started
-        )
+            response = (
+                llm_manager.generate(
+                    system_prompt=(
+                        SYSTEM_PROMPT
+                    ),
+                    user_prompt=(
+                        prompt
+                    ),
+                    provider=(
+                        llm_provider
+                    ),
+                    model=(
+                        llm_model
+                    ),
+                )
+            )
+
+            generation_seconds = (
+                time.perf_counter()
+                - generation_started
+            )
+
+            generation_observation.update(
+                output=(
+                    response.text
+                ),
+                model=(
+                    response.model
+                ),
+                metadata={
+                    "provider": (
+                        response.provider
+                    ),
+                    "duration_seconds": (
+                        generation_seconds
+                    ),
+                },
+            )
 
         total_seconds = (
             time.perf_counter()
@@ -253,34 +619,43 @@ class RagService:
         )
 
         print(
-            f"[RAG] Generation: "
-            f"{generation_seconds:.3f}s"
+            (
+                "[RAG] Generation: "
+                f"{generation_seconds:.3f}s"
+            )
         )
 
         print(
-            f"[RAG] Total: "
-            f"{total_seconds:.3f}s"
+            (
+                "[RAG] Total: "
+                f"{total_seconds:.3f}s"
+            )
         )
 
         print(
-            f"[RAG] Used LLM: "
-            f"{response.provider} / "
-            f"{response.model}"
+            (
+                "[RAG] Used LLM: "
+                f"{response.provider} / "
+                f"{response.model}"
+            )
         )
 
-        print("=" * 80)
+        print(
+            "=" * 80
+        )
 
-        #
-        # 7. Return answer + metadata
-        #
-        return RagAnswer(
+        sources = (
+            self._build_sources(
+                selected_results
+            )
+        )
+
+        answer = RagAnswer(
             answer=(
                 response.text
             ),
             sources=(
-                self._build_sources(
-                    selected_results
-                )
+                sources
             ),
             provider=(
                 response.provider
@@ -302,12 +677,86 @@ class RagService:
             ),
         )
 
+        #
+        # Root trace output.
+        #
+
+        trace.update(
+            output={
+                "answer": (
+                    answer.answer
+                ),
+                "source_count": (
+                    len(
+                        answer.sources
+                    )
+                ),
+                "sources": [
+                    {
+                        "citation": (
+                            source.citation
+                        ),
+                        "source_id": (
+                            source.source_id
+                        ),
+                        "document_id": (
+                            source.document_id
+                        ),
+                        "chunk_id": (
+                            source.chunk_id
+                        ),
+                        "source_name": (
+                            source.source_name
+                        ),
+                        "document_title": (
+                            source.document_title
+                        ),
+                        "reference": (
+                            source.reference
+                        ),
+                    }
+                    for source
+                    in answer.sources
+                ],
+            },
+            metadata={
+                "provider": (
+                    answer.provider
+                ),
+                "model": (
+                    answer.model
+                ),
+                "retrieval_seconds": (
+                    answer
+                    .retrieval_seconds
+                ),
+                "rerank_seconds": (
+                    answer
+                    .rerank_seconds
+                ),
+                "generation_seconds": (
+                    answer
+                    .generation_seconds
+                ),
+                "total_seconds": (
+                    answer.total_seconds
+                ),
+            },
+        )
+
+        return answer
+
     def _limit_context(
         self,
-        results: list[RetrievedChunk],
-    ) -> list[RetrievedChunk]:
+        results: list[
+            RetrievedChunk
+        ],
+    ) -> list[
+        RetrievedChunk
+    ]:
 
         if not results:
+
             return []
 
         selected = []
@@ -322,10 +771,11 @@ class RagService:
             ).strip()
 
             if not text:
+
                 continue
 
-            content_length = len(
-                text
+            content_length = (
+                len(text)
             )
 
             if (
@@ -333,9 +783,11 @@ class RagService:
                 and (
                     total_chars
                     + content_length
-                    > self.MAX_CONTEXT_CHARS
+                    > self
+                    .MAX_CONTEXT_CHARS
                 )
             ):
+
                 break
 
             selected.append(
@@ -350,12 +802,19 @@ class RagService:
 
     def _build_prompt_sources(
         self,
-        results: list[RetrievedChunk],
-    ) -> list[PromptSource]:
+        results: list[
+            RetrievedChunk
+        ],
+    ) -> list[
+        PromptSource
+    ]:
 
         sources = []
 
-        for index, result in enumerate(
+        for (
+            index,
+            result,
+        ) in enumerate(
             results,
             start=1,
         ):
@@ -366,13 +825,16 @@ class RagService:
                         f"S{index}"
                     ),
                     source_name=(
-                        result.source_name
+                        result
+                        .source_name
                     ),
                     document_title=(
-                        result.document_title
+                        result
+                        .document_title
                     ),
                     reference=(
-                        self._get_reference(
+                        self
+                        ._get_reference(
                             result
                         )
                     ),
@@ -386,12 +848,19 @@ class RagService:
 
     def _build_sources(
         self,
-        results: list[RetrievedChunk],
-    ) -> list[RagSource]:
+        results: list[
+            RetrievedChunk
+        ],
+    ) -> list[
+        RagSource
+    ]:
 
         sources = []
 
-        for index, result in enumerate(
+        for (
+            index,
+            result,
+        ) in enumerate(
             results,
             start=1,
         ):
@@ -417,13 +886,15 @@ class RagService:
                         result.source_type
                     ),
                     document_title=(
-                        result.document_title
+                        result
+                        .document_title
                     ),
                     chunk_index=(
                         result.chunk_index
                     ),
                     reference=(
-                        self._get_reference(
+                        self
+                        ._get_reference(
                             result
                         )
                     ),
@@ -431,40 +902,83 @@ class RagService:
                         result.score
                     ),
                     rerank_score=(
-                        result.rerank_score
+                        result
+                        .rerank_score
                     ),
                 )
             )
 
         return sources
 
+    def _trace_chunks(
+        self,
+        results: list[
+            RetrievedChunk
+        ],
+    ) -> list[
+        dict
+    ]:
+
+        traced = []
+
+        for result in results:
+
+            traced.append(
+                {
+                    "source_id": (
+                        result.source_id
+                    ),
+                    "document_id": (
+                        result.document_id
+                    ),
+                    "chunk_id": (
+                        result.chunk_id
+                    ),
+                    "chunk_index": (
+                        result.chunk_index
+                    ),
+                    "source_name": (
+                        result.source_name
+                    ),
+                    "document_title": (
+                        result.document_title
+                    ),
+                    "reference": (
+                        self
+                        ._get_reference(
+                            result
+                        )
+                    ),
+                    "vector_score": (
+                        result.score
+                    ),
+                    "rerank_score": (
+                        result
+                        .rerank_score
+                    ),
+                }
+            )
+
+        return traced
+
     @staticmethod
     def _get_reference(
         result: RetrievedChunk,
-    ) -> str | None:
+    ) -> (
+        str
+        | None
+    ):
 
-        #
-        # Website:
-        # external_id is normally the page URL.
-        #
         if (
             result.source_type
             == "web"
         ):
+
             return (
                 result.external_id
                 or result.source_uri
             )
 
-        #
-        # Git:
-        #
-        # source_uri:
-        # https://github.com/.../repo
-        #
-        # external_id:
-        # src/services/example.py
-        #
         if (
             result.source_type
             == "git"
@@ -474,6 +988,7 @@ class RagService:
                 result.source_uri
                 and result.external_id
             ):
+
                 return (
                     f"{result.source_uri}"
                     f" -> "
@@ -485,21 +1000,16 @@ class RagService:
                 or result.source_uri
             )
 
-        #
-        # Uploaded file.
-        #
         if (
             result.source_type
             == "file"
         ):
+
             return (
                 result.document_title
                 or result.external_id
             )
 
-        #
-        # Fallback.
-        #
         return (
             result.external_id
             or result.source_uri
@@ -507,4 +1017,6 @@ class RagService:
         )
 
 
-rag_service = RagService()
+rag_service = (
+    RagService()
+)

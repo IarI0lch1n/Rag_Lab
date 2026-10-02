@@ -27,6 +27,10 @@ from src.logging_config import (
     setup_logging,
 )
 
+from src.observability.langfuse_service import (
+    langfuse_service,
+)
+
 from src.ui.main_page import (
     create_main_page,
 )
@@ -35,11 +39,6 @@ from src.vector_store.qdrant_store import (
     qdrant_store,
 )
 
-
-#
-# Initialize logging once, before
-# application infrastructure checks.
-#
 
 setup_logging()
 
@@ -144,13 +143,6 @@ def initialize_application(
         "Testing Microsoft SQL Server..."
     )
 
-    logger.info(
-        (
-            "Testing Microsoft "
-            "SQL Server connection."
-        )
-    )
-
     (
         sql_success,
         sql_message,
@@ -202,13 +194,6 @@ def initialize_application(
         "Testing Qdrant..."
     )
 
-    logger.info(
-        (
-            "Testing Qdrant "
-            "connection."
-        )
-    )
-
     (
         qdrant_success,
         qdrant_message,
@@ -253,6 +238,88 @@ def initialize_application(
                 "failed | %s"
             ),
             qdrant_message,
+        )
+
+    #
+    # LANGFUSE PUBLIC API
+    #
+
+    print()
+    print(
+        "Testing Langfuse API..."
+    )
+
+    if (
+        settings
+        .langfuse_enabled
+    ):
+
+        (
+            langfuse_success,
+            langfuse_message,
+        ) = (
+            langfuse_service
+            .test_connection()
+        )
+
+        if langfuse_success:
+
+            print(
+                (
+                    f"[OK] "
+                    f"{langfuse_message}"
+                )
+            )
+
+            logger.info(
+                (
+                    "Langfuse API "
+                    "connection successful | %s"
+                ),
+                langfuse_message,
+            )
+
+        else:
+
+            print(
+                (
+                    "[ERROR] Langfuse API "
+                    "connection failed:"
+                )
+            )
+
+            print(
+                langfuse_message
+            )
+
+            logger.error(
+                (
+                    "Langfuse API "
+                    "connection failed | %s"
+                ),
+                langfuse_message,
+            )
+
+    else:
+
+        langfuse_success = (
+            not settings
+            .langfuse_required
+        )
+
+        langfuse_message = (
+            "Langfuse is disabled."
+        )
+
+        print(
+            (
+                "[WARNING] "
+                f"{langfuse_message}"
+            )
+        )
+
+        logger.warning(
+            langfuse_message
         )
 
     #
@@ -315,15 +382,22 @@ def initialize_application(
     # RESULT
     #
 
-    print()
-    print(
-        "=" * 70
+    langfuse_ready = (
+        langfuse_success
+        or not settings
+        .langfuse_required
     )
 
     ready = (
         sql_success
         and qdrant_success
         and db_success
+        and langfuse_ready
+    )
+
+    print()
+    print(
+        "=" * 70
     )
 
     if ready:
@@ -357,11 +431,13 @@ def initialize_application(
                 "initialization failed | "
                 "sql=%s | "
                 "qdrant=%s | "
-                "database=%s"
+                "database=%s | "
+                "langfuse=%s"
             ),
             sql_success,
             qdrant_success,
             db_success,
+            langfuse_success,
         )
 
     print(
@@ -403,21 +479,19 @@ def run_application(
         )
     )
 
-    ui.run(
-        title="The Advisor",
-        host="127.0.0.1",
-        port=8080,
+    try:
 
-        #
-        # Important on Windows:
-        # disabling reload prevents
-        # the application initialization
-        # sequence from running twice.
-        #
-        reload=False,
+        ui.run(
+            title="The Advisor",
+            host="127.0.0.1",
+            port=8080,
+            reload=False,
+            show=True,
+        )
 
-        show=True,
-    )
+    finally:
+
+        langfuse_service.shutdown()
 
 
 if __name__ == "__main__":

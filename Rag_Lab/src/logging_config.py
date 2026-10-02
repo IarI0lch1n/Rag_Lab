@@ -193,3 +193,5 @@ def setup_logging() -> None:
     ).info(
         "The Advisor system initialized."
     )
+
+  

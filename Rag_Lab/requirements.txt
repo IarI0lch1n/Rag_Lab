@@ -23,3 +23,5 @@ google-genai>=2.3.0
 groq
 
 ddgs>=9.16.0
+
+langfuse>=4.7.0,<5

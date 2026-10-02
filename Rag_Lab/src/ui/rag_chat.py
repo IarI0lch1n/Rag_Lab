@@ -690,6 +690,9 @@ class RagChat:
                     llm_model=(
                         model
                     ),
+                    session_id=(
+                        self.session_id
+                    ),
                 )
             )
 

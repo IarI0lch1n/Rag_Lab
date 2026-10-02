@@ -55,16 +55,8 @@ class Settings(BaseSettings):
         "rag_documents"
     )
 
-    #
-    # Cloud Qdrant can occasionally take
-    # longer than 30 seconds, especially
-    # during upserts.
-    #
     qdrant_timeout_seconds: float = 90.0
 
-    #
-    # Total attempts, including the first.
-    #
     qdrant_max_attempts: int = 3
 
     qdrant_retry_base_delay_seconds: float = (
@@ -129,15 +121,49 @@ class Settings(BaseSettings):
 
     llm_max_output_tokens: int = 1200
 
-    #
-    # Retry only temporary failures:
-    # 500 / 502 / 503 / 504 / timeouts.
-    #
     llm_max_retries: int = 2
 
     llm_retry_base_delay_seconds: float = (
         2.0
     )
+
+    #
+    # LANGFUSE
+    #
+
+    langfuse_enabled: bool = True
+
+    #
+    # Since Langfuse is a laboratory
+    # requirement, startup will fail
+    # when Langfuse is unavailable.
+    #
+    # For offline development this can
+    # temporarily be changed in .env:
+    #
+    # LANGFUSE_REQUIRED=false
+    #
+    langfuse_required: bool = True
+
+    langfuse_public_key: str = ""
+
+    langfuse_secret_key: str = ""
+
+    langfuse_base_url: str = (
+        "https://cloud.langfuse.com"
+    )
+
+    langfuse_tracing_environment: str = (
+        "development"
+    )
+
+    langfuse_timeout_seconds: float = 10.0
+
+    #
+    # Useful for the laboratory because
+    # traces appear as quickly as possible.
+    #
+    langfuse_flush_after_request: bool = True
 
     model_config = SettingsConfigDict(
         env_file=".env",

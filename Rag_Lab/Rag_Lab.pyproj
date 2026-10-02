@@ -42,6 +42,7 @@
     <Compile Include="src\grabber\__init__.py" />
     <Compile Include="src\logging_config.py" />
     <Compile Include="src\observability\activity.py" />
+    <Compile Include="src\observability\langfuse_service.py" />
     <Compile Include="src\observability\__init__.py" />
     <Compile Include="src\parsers\base.py" />
     <Compile Include="src\parsers\docx_parser.py" />
@@ -85,6 +86,7 @@
     <Compile Include="tests\auto_research_test.py" />
     <Compile Include="tests\chat_repository_test.py" />
     <Compile Include="tests\internet_research_test.py" />
+    <Compile Include="tests\langfuse_test.py" />
     <Compile Include="tests\llm_smoke_test.py" />
     <Compile Include="tests\qdrant_cleanup_test.py" />
     <Compile Include="tests\rag_chat_test.py" />
